@@ -1,0 +1,280 @@
+{
+ "decider_model": "strands-decider-2b-hobson-v19",
+ "rows": [
+  {
+   "i": 0,
+   "expected": {
+    "action": "INTERJECT",
+    "contains_sensitive": "yes"
+   },
+   "decider": {
+    "action": {
+     "label": "INTERJECT",
+     "confidence": 0.8827
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8156
+    }
+   },
+   "decider_ms": 3247.5829999966663,
+   "decider_server_ms": 2275.5,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 1,
+   "expected": {
+    "action": "TAKE_NOTE",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.7404
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8897
+    }
+   },
+   "decider_ms": 3370.675099999062,
+   "decider_server_ms": 2182.5,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 2,
+   "expected": {
+    "action": "STAY_SILENT",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "STAY_SILENT",
+     "confidence": 0.5568
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.9031
+    }
+   },
+   "decider_ms": 3278.54379999917,
+   "decider_server_ms": 2461.7,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 3,
+   "expected": {
+    "action": "TAKE_NOTE",
+    "contains_sensitive": "yes"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.6016
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8621
+    }
+   },
+   "decider_ms": 3297.178700006043,
+   "decider_server_ms": 2485.1,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 4,
+   "expected": {
+    "action": "INTERJECT",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "INTERJECT",
+     "confidence": 0.9122
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8932
+    }
+   },
+   "decider_ms": 5885.712800001784,
+   "decider_server_ms": 5058.5,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 5,
+   "expected": {
+    "action": "TAKE_NOTE",
+    "contains_sensitive": "yes"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.6154
+    },
+    "contains_sensitive": {
+     "label": "yes",
+     "confidence": 0.5196
+    }
+   },
+   "decider_ms": 3243.3128999982728,
+   "decider_server_ms": 2470.7,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 6,
+   "expected": {
+    "action": "STAY_SILENT",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.4945
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8937
+    }
+   },
+   "decider_ms": 3560.5690000011236,
+   "decider_server_ms": 2433.0,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 7,
+   "expected": {
+    "action": "TAKE_NOTE",
+    "contains_sensitive": "yes"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.6212
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.6556
+    }
+   },
+   "decider_ms": 2984.030300001905,
+   "decider_server_ms": 2220.1,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 8,
+   "expected": {
+    "action": "TAKE_NOTE",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "TAKE_NOTE",
+     "confidence": 0.7077
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8708
+    }
+   },
+   "decider_ms": 3222.7237000042805,
+   "decider_server_ms": 2509.9,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 9,
+   "expected": {
+    "action": "INTERJECT",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "INTERJECT",
+     "confidence": 0.8891
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8882
+    }
+   },
+   "decider_ms": 3049.3216999966535,
+   "decider_server_ms": 2207.0,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 10,
+   "expected": {
+    "action": "INTERJECT",
+    "contains_sensitive": "yes"
+   },
+   "decider": {
+    "action": {
+     "label": "INTERJECT",
+     "confidence": 0.8928
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8749
+    }
+   },
+   "decider_ms": 3103.0170999947586,
+   "decider_server_ms": 2263.9,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  },
+  {
+   "i": 11,
+   "expected": {
+    "action": "STAY_SILENT",
+    "contains_sensitive": "no"
+   },
+   "decider": {
+    "action": {
+     "label": "INTERJECT",
+     "confidence": 0.4267
+    },
+    "contains_sensitive": {
+     "label": "no",
+     "confidence": 0.8778
+    }
+   },
+   "decider_ms": 3227.3047999988194,
+   "decider_server_ms": 2357.6,
+   "llm_error": "NoCredentialsError: Unable to locate credentials"
+  }
+ ],
+ "summary": {
+  "decider": {
+   "accuracy": 0.75,
+   "decisions": 24,
+   "per_question": {
+    "action": 0.8333,
+    "contains_sensitive": 0.6667
+   },
+   "latency_p50_ms": 3247.6,
+   "latency_p95_ms": 3560.6,
+   "usd_per_1k_decisions": 0.035,
+   "confident_share": 0.6667,
+   "accuracy_when_confident": 0.8125,
+   "sent_to_human_at_threshold": 8
+  },
+  "llm": {
+   "accuracy": null,
+   "decisions": 0,
+   "per_question": {},
+   "latency_p50_ms": null,
+   "latency_p95_ms": null,
+   "usd_per_1k_decisions": 0.0,
+   "confident_share": null,
+   "accuracy_when_confident": null,
+   "sent_to_human_at_threshold": 0
+  }
+ },
+ "threshold": 0.7,
+ "llm_model": "us.amazon.nova-pro-v1:0",
+ "llm_provider": "bedrock",
+ "llm_where": "Amazon Bedrock (us.amazon.nova-pro-v1:0)",
+ "decider_url": "https://da25tnxy06gjk.cloudfront.net",
+ "decider_mode": "ugmdu",
+ "ran_at": 1792427650.9482949,
+ "split": "test"
+}

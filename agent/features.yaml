@@ -1,0 +1,14 @@
+# Amazon Bedrock AgentCore features for Hush.
+# `./kit deploy` reads this and adds enabled features to the runtime.
+
+memory:
+  enabled: false           # Hush is stateless per-session; transcripts are not persisted.
+  name: agentmemory
+  strategies: [SEMANTIC]
+  expiry_days: 7
+
+gateway:
+  enabled: false           # All tools are self-contained; no external MCP or Lambda needed.
+  name: tools
+  authorizer: AWS_IAM
+  targets: []

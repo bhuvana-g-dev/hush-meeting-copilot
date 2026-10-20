@@ -1,0 +1,25 @@
+# Hush demo script — recorded by ./kit video against the real agent.
+# Each turn is typed into the demo UI. `narrate` describes the situation;
+# make_video.py appends what the decider actually decided, so the narration
+# never claims something that did not happen.
+title: "Hush: an AI meeting copilot that decides before it acts"
+pitch: "An AI copilot that listens to live meeting transcripts and uses Strands Decider 2B to choose INTERJECT, TAKE_NOTE, or STAY_SILENT — never acting without a reason."
+features:
+  - "choose INTERJECT, TAKE_NOTE, or STAY_SILENT with Strands Decider 2B"
+  - "interject only when the meeting genuinely needs it"
+  - "take structured notes silently for decisions, commitments and risks"
+  - "low-confidence choices routed to human review automatically"
+  - "deployed on Amazon Bedrock AgentCore Runtime"
+eager: false
+intro: "Hush is an AI meeting copilot. Amazon Bedrock handles the suggestions and notes; Strands Decider 2B decides — in one forward pass — whether to interject, take a note, or stay silent."
+intro_normal: "Hush runs on Amazon Bedrock AgentCore Runtime. Amazon Bedrock handles the conversation; Strands Decider 2B makes the guardrails decision before every action."
+turns:
+  - say: "[Alice]: The NDA with Apex Corp expires this Friday — if we miss it, legal liability is real.\n[Bob]: Someone needs to own this before the end of the meeting."
+    narrate: "A legal deadline is about to be missed with no owner. The decider must decide whether to interject."
+  - say: "[Carol]: I will send the Q4 roadmap calendar invite by EOD. Dave will review the slides before then."
+    narrate: "A clear commitment from two people. The decider should record it as a note rather than interrupt."
+  - say: "[Eve]: Great meeting everyone, same time next week?"
+    narrate: "A routine closing exchange. The decider should stay silent."
+  - say: "[Grace]: The admin password is Summer2024! — please rotate it after this call."
+    narrate: "A plain-text credential shared in the meeting. The decider should interject with a security alert."
+outro: "One forward pass per action — INTERJECT, TAKE_NOTE, or STAY_SILENT — with calibrated confidence. Low-confidence choices go to a human. Amazon Bedrock handles the rest."
