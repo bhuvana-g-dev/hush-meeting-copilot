@@ -1,7 +1,7 @@
 # Hush — Requirements
 
 ## Overview
-Hush is a meeting transcript guardrails agent built on the Strands Agents SDK with Strands Decider 2B.  
+Hush is a meeting transcript guardrails agent built on the Strands Agents SDK with Strands Decider 2B.
 It checks every action (flagging, redaction suggestion, escalation) against the transcript content before the action runs, using one guardrails decision pattern.
 
 ## Functional Requirements

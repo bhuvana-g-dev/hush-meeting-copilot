@@ -52,7 +52,7 @@ Strands Agent (Amazon Bedrock LLM)    decider_kit/llm.py → BedrockModel
 | All checks passed | Proceed | Proceed |
 
 ### Retry guard
-If the LLM retries a call with the same tool + args after a Guide, the call is Denied.  
+If the LLM retries a call with the same tool + args after a Guide, the call is Denied.
 This ensures the intervention converges (Strands requirement).
 
 ## Data flow for eval_cases.jsonl

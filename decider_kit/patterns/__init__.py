@@ -22,4 +22,3 @@ PATTERNS = {
     "context_memory": "#context-memory",
 }
 TAGS = set(PATTERNS.values())
-
