@@ -11,12 +11,22 @@
   header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); }
   header .dot { width:10px; height:10px; border-radius:50%; background:var(--orange); box-shadow:0 0 12px var(--orange); }
   header h1 { font-size:18px; margin:0; } header .meta { color:var(--mute); font-size:13px; margin-left:auto; }
+  /* Google Meet connection indicator */
+  header .meet-status { display:flex; align-items:center; gap:8px; padding:6px 12px; border-radius:8px; background:#1E2A47; border:1px solid var(--line); font-size:12px; font-weight:600; }
+  header .meet-status.connected { border-color:var(--green); color:var(--green); }
+  header .meet-status.waiting { border-color:var(--amber); color:var(--amber); }
+  header .meet-status.disconnected { border-color:var(--mute); color:var(--mute); }
+  header .meet-status .indicator { width:8px; height:8px; border-radius:50%; background:currentColor; animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
   main { display:grid; grid-template-columns:1.1fr 1fr; gap:18px; padding:18px 22px; height:calc(100vh - 60px); }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; min-height:0; }
   .card h2 { margin:0 0 10px; font-size:14px; color:var(--mute); text-transform:uppercase; letter-spacing:.08em; }
   #log { flex:1; overflow:auto; display:flex; flex-direction:column; gap:10px; }
   .msg { padding:10px 13px; border-radius:12px; max-width:88%; line-height:1.45; white-space:pre-wrap; }
   .user { align-self:flex-end; background:#1E2A47; } .bot { align-self:flex-start; background:#18243B; border:1px solid var(--line); }
+  /* Google Meet transcript styling */
+  .transcript { align-self:flex-start; background:#0F1628; border-left:3px solid var(--blue); padding:10px 13px; border-radius:12px; max-width:88%; }
+  .transcript .label { font-size:11px; color:var(--blue); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; }
   .bot .t { color:var(--mute); font-size:12px; margin-top:6px; }
   form { display:flex; gap:10px; margin-top:12px; } input { flex:1; background:#0F1628; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit; }
   button { background:var(--orange); color:#111; border:0; border-radius:10px; padding:0 18px; font-weight:700; cursor:pointer; }
@@ -34,23 +44,74 @@
   .clip { display:flex; align-items:center; padding:0 12px; border:1px solid var(--line); border-radius:10px; cursor:pointer; font-size:18px; }
   .att { display:flex; gap:8px; margin-top:10px; } .att img, .msg img { height:64px; border-radius:8px; border:1px solid var(--line); }
   .msg img { height:120px; display:block; margin-bottom:6px; }
+  /* Extension setup notice */
+  .setup-notice { background:rgba(96, 165, 250, 0.1); border:1px solid var(--blue); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .setup-notice h3 { font-size:14px; color:var(--blue); margin-bottom:8px; }
+  .setup-notice p { font-size:13px; line-height:1.6; color:var(--ink); margin-bottom:8px; }
+  .setup-notice ol { margin-left:20px; font-size:13px; color:var(--mute); }
+  .setup-notice ol li { margin-bottom:6px; line-height:1.5; }
+  .setup-notice code { background:#0F1628; padding:2px 6px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--orange); }
 </style>
 </head>
 <body>
-<header><span class="dot"></span><h1 id="name">Decider agent</h1><span class="meta" id="meta"></span></header>
+<header>
+  <span class="dot"></span>
+  <h1 id="name">Decider agent</h1>
+  <div id="meetStatus" class="meet-status disconnected">
+    <span class="indicator"></span>
+    <span id="meetStatusText">Google Meet: Not Connected</span>
+  </div>
+  <span class="meta" id="meta"></span>
+</header>
 <main>
-  <section class="card"><h2>Conversation</h2><div id="log"></div>
+  <section class="card">
+    <h2>Conversation</h2>
+    
+    <!-- Google Meet Setup Notice (shown when not connected) -->
+    <div id="setupNotice" class="setup-notice">
+      <h3>📹 Connect to Google Meet</h3>
+      <p>To analyze live meeting captions, install the Hush Chrome Extension:</p>
+      <ol>
+        <li>Open <code>chrome://extensions</code> in Chrome</li>
+        <li>Enable <strong>Developer mode</strong></li>
+        <li>Click <strong>Load unpacked</strong> and select <code>chrome-extension/</code> folder</li>
+        <li>Join a Google Meet call and enable captions (CC button)</li>
+        <li>Click the Hush extension icon and <strong>Start Capture</strong></li>
+      </ol>
+      <p style="margin-top:12px;">You can still use the text input below to test Hush manually.</p>
+    </div>
+    
+    <div id="log"></div>
     <div id="att" class="att"></div>
-    <form id="f"><label class="clip" title="Attach a photo">&#128206;<input id="img" type="file" accept="image/*" multiple hidden></label><input id="m" placeholder="Paste a meeting transcript or ask Hush to check it…" autocomplete="off"><button>Send</button></form></section>
+    <form id="f"><label class="clip" title="Attach a photo">&#128206;<input id="img" type="file" accept="image/*" multiple hidden></label><input id="m" placeholder="Paste a meeting transcript or ask Hush to check it…" autocomplete="off"><button>Send</button></form>
+  </section>
   <section class="card"><h2>Strands Decider 2B decisions</h2><div id="dec"><p class="empty">Decisions appear here as the agent makes them.</p></div>
     <div class="credit">Built with the AWS User Group Madurai Strands Decider hackathon kit</div></section>
 </main>
 <script>
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const log = document.getElementById("log"), dec = document.getElementById("dec");
+const meetStatus = document.getElementById("meetStatus");
+const meetStatusText = document.getElementById("meetStatusText");
+const setupNotice = document.getElementById("setupNotice");
+
+let isGoogleMeetConnected = false;
+let lastTranscriptTime = 0;
+
 fetch("/api/info").then(r => r.json()).then(i => { document.getElementById("name").textContent = i.agent;
   document.getElementById("meta").textContent = `LLM: ${i.llm} · Decider: ${i.decider} · ${i.target === "agentcore" ? "on AgentCore Runtime" : "local agent"}`; });
+
 function add(cls, html) { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; log.appendChild(d); log.scrollTop = 1e9; return d; }
+
+function addTranscript(text) {
+  const d = document.createElement("div");
+  d.className = "msg transcript";
+  d.innerHTML = `<div class="label">🎙️ Google Meet Live</div>${esc(text)}`;
+  log.appendChild(d);
+  log.scrollTop = 1e9;
+  return d;
+}
+
 function decision(rec) {
   if (dec.querySelector(".empty")) dec.innerHTML = "";
   const verdict = rec.verdict || rec.action || rec.tier || "";
@@ -64,16 +125,64 @@ function decision(rec) {
     `<div class="kv">${rest.map(([k, v]) => `${esc(k)}: ${esc(typeof v === "object" ? JSON.stringify(v) : v)}`).join(" · ")}</div>`;
   dec.prepend(el);
 }
+
+function updateMeetStatus(status, text) {
+  meetStatus.className = `meet-status ${status}`;
+  meetStatusText.textContent = text;
+  
+  if (status === 'connected' || status === 'waiting') {
+    setupNotice.style.display = 'none';
+    isGoogleMeetConnected = true;
+  } else {
+    if (!document.body.dataset.turns || document.body.dataset.turns === '0') {
+      setupNotice.style.display = 'block';
+    }
+    isGoogleMeetConnected = false;
+  }
+}
+
+// Check for Google Meet connection via extension
+async function checkExtensionConnection() {
+  try {
+    // Check if any recent messages came from Google Meet
+    // This is detected by checking the session_id pattern or last message time
+    const now = Date.now();
+    if (lastTranscriptTime > 0 && (now - lastTranscriptTime) < 15000) {
+      updateMeetStatus('connected', 'Google Meet: Connected');
+    } else if (lastTranscriptTime > 0) {
+      updateMeetStatus('waiting', 'Google Meet: Waiting for captions');
+    } else {
+      updateMeetStatus('disconnected', 'Google Meet: Not Connected');
+    }
+  } catch (error) {
+    console.error('Extension check failed:', error);
+  }
+}
+
+// Poll for connection status
+setInterval(checkExtensionConnection, 3000);
+checkExtensionConnection();
+
 let pending = [];  // attached photos as data URLs, sent with the next message
 const att = document.getElementById("att");
 document.getElementById("img").addEventListener("change", async (e) => {
   for (const f of e.target.files) pending.push(await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(f); }));
   att.innerHTML = pending.map((u) => `<img src="${u}" alt="attached photo">`).join(""); e.target.value = "";
 });
+
 document.getElementById("f").addEventListener("submit", async (e) => {
   e.preventDefault(); const m = document.getElementById("m"); const text = m.value.trim(); if (!text && !pending.length) return; m.value = "";
   const images = pending; pending = []; att.innerHTML = "";
-  add("user", images.map((u) => `<img src="${u}" alt="photo">`).join("") + esc(text)); const wait = add("bot", "<span class='t'>thinking...</span>");
+  
+  // Check if this looks like a Google Meet transcript
+  const isTranscript = text.includes('[') && text.includes(']:');
+  if (isTranscript) {
+    addTranscript(text);
+  } else {
+    add("user", images.map((u) => `<img src="${u}" alt="photo">`).join("") + esc(text));
+  }
+  
+  const wait = add("bot", "<span class='t'>thinking...</span>");
   const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text || "(photo)", images }) });
   const out = await r.json();
   if (out.error) { wait.innerHTML = `<span style="color:#F87171">${esc(out.error)}</span>`; return; }
@@ -81,6 +190,29 @@ document.getElementById("f").addEventListener("submit", async (e) => {
   const n = (out.decisions || []).length;
   wait.innerHTML = esc(out.reply) + `<div class="t">${out.latency_ms} ms · ${n} decision${n === 1 ? "" : "s"}${out.served_by ? " · " + esc(out.served_by) : ""}</div>`;
   document.body.dataset.turns = (+(document.body.dataset.turns || 0) + 1);
+  
+  // Hide setup notice after first interaction
+  if (document.body.dataset.turns > 0) {
+    setupNotice.style.display = 'none';
+  }
+  
+  // Track if this was from Google Meet (via extension)
+  if (isTranscript || out.session_id?.startsWith('meet-')) {
+    lastTranscriptTime = Date.now();
+    updateMeetStatus('connected', 'Google Meet: Connected');
+  }
+});
+
+// Listen for messages from Chrome Extension (if available)
+// This requires the extension to post messages to the window
+window.addEventListener('message', (event) => {
+  // Only accept messages from same origin
+  if (event.origin !== window.location.origin) return;
+  
+  if (event.data.type === 'HUSH_TRANSCRIPT_UPDATE') {
+    lastTranscriptTime = Date.now();
+    updateMeetStatus('connected', 'Google Meet: Connected');
+  }
 });
 </script>
 </body>
