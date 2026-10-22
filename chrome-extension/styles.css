@@ -1,0 +1,295 @@
+/* Hush Chrome Extension Popup Styles */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 400px;
+  min-height: 500px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+  background: #0B1020;
+  color: #E7ECF6;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.container {
+  padding: 20px;
+}
+
+/* Header */
+header {
+  text-align: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #223052;
+}
+
+header h1 {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, #FF9900, #FFB84D);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #8D9AB5;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Status Section */
+.status-section {
+  background: #121A2E;
+  border: 1px solid #223052;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.status-item:not(:last-child) {
+  border-bottom: 1px solid #1a2438;
+}
+
+.label {
+  font-weight: 600;
+  color: #8D9AB5;
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.status-ok {
+  background: rgba(52, 211, 153, 0.1);
+  color: #34D399;
+  border-color: #34D399;
+}
+
+.status-error {
+  background: rgba(248, 113, 113, 0.1);
+  color: #F87171;
+  border-color: #F87171;
+}
+
+.status-warning {
+  background: rgba(251, 191, 36, 0.1);
+  color: #FBBF24;
+  border-color: #FBBF24;
+}
+
+.status-unknown {
+  background: rgba(141, 154, 181, 0.1);
+  color: #8D9AB5;
+  border-color: #8D9AB5;
+}
+
+.status-capturing {
+  background: rgba(96, 165, 250, 0.1);
+  color: #60A5FA;
+  border-color: #60A5FA;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Controls Section */
+.controls-section {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #FF9900;
+  color: #0B1020;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #FFB84D;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 153, 0, 0.3);
+}
+
+.btn-secondary {
+  background: #1E2A47;
+  color: #E7ECF6;
+  border: 1px solid #223052;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #2A3A5A;
+  transform: translateY(-1px);
+}
+
+.btn-icon {
+  font-size: 12px;
+}
+
+/* Info Section */
+.info-section {
+  margin-bottom: 20px;
+}
+
+.info-card {
+  background: #121A2E;
+  border: 1px solid #223052;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.info-card h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: #E7ECF6;
+}
+
+.info-card ol {
+  margin-left: 20px;
+  color: #8D9AB5;
+}
+
+.info-card ol li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.info-card ul {
+  margin-left: 20px;
+  color: #8D9AB5;
+}
+
+.info-card ul li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.info-card code {
+  background: #0F1628;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 12px;
+  color: #FFB84D;
+}
+
+.privacy-notice {
+  border-color: #60A5FA;
+}
+
+.privacy-notice h3 {
+  color: #60A5FA;
+}
+
+/* Error Section */
+.error-section {
+  margin-bottom: 20px;
+}
+
+.error-card {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid #F87171;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.error-card h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #F87171;
+}
+
+.error-card p {
+  color: #E7ECF6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  padding-top: 16px;
+  border-top: 1px solid #223052;
+}
+
+.footer-text {
+  font-size: 12px;
+  color: #8D9AB5;
+  margin-bottom: 8px;
+}
+
+.footer-link a {
+  font-size: 13px;
+  color: #FF9900;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.footer-link a:hover {
+  color: #FFB84D;
+  text-decoration: underline;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1020;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #223052;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2A3A5A;
+}
