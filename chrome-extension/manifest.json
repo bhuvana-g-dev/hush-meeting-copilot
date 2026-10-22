@@ -1,18 +1,26 @@
 {
   "manifest_version": 3,
-  "name": "Hush Meeting Copilot",
-  "version": "1.0.0",
-  "description": "AI meeting copilot that captures Google Meet captions and provides intelligent real-time insights using Strands Decider 2B",
+  "name": "Meeting Copilot — Live Wingman for Google Meet",
+  "version": "1.1.0",
+  "description": "Live Google Meet wingman that keeps you focused on your goal, alerts you when your topic is discussed, and suggests opportune moments to ask doubts.",
+
   "permissions": [
     "storage",
-    "activeTab"
+    "tabs",
+    "scripting"
   ],
+
   "host_permissions": [
-    "https://meet.google.com/*"
+    "https://meet.google.com/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*"
   ],
+
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
+
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
@@ -20,23 +28,24 @@
       "run_at": "document_idle"
     }
   ],
+
   "action": {
     "default_popup": "popup.html",
+    "default_title": "Hush AI Meeting Companion",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
+
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["panel.html", "panel.js", "styles.css"],
-      "matches": ["https://meet.google.com/*"]
-    }
-  ]
+
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+  }
 }

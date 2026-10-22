@@ -1,344 +1,869 @@
 /**
- * Hush Meeting Copilot - Google Meet Content Script
- * Captures visible captions from Google Meet and sends them to the Hush backend.
- * Only captures after user clicks "Start Capture" in the extension popup.
+ * Meeting Copilot — In-Meeting Wingman Content Script
+ * Runs directly on https://meet.google.com/*
+ *
+ * Responsibilities:
+ * 1. Injects a floating, draggable in-meeting HUD overlay directly into Google Meet.
+ * 2. Allows attendee to set/edit their meeting goal/aim.
+ * 3. Listens to Google Meet's live captions in real time.
+ * 4. Dispatches segments to backend for Strands Decider 2B & LLM analysis.
+ * 5. Displays real-time Focus Alerts (wake-up recovery when zoned out) and
+ *    opportune "Ask Your Doubt Now" cues with copy/paste directly into Meet chat.
  */
 
-// Configuration
-const CONFIG = {
-  captionCheckInterval: 500,  // Check for new captions every 500ms
-  batchInterval: 3000,        // Send batched captions every 3 seconds
-  maxRetries: 3,
-  retryDelay: 2000
-};
+"use strict";
 
-// State
-let isCapturing = false;
-let captionBuffer = [];
-let lastCaptionText = '';
-let captionObserver = null;
-let batchTimer = null;
-let backendUrl = 'http://localhost:8501';  // Default, will be updated from storage
-let sessionId = null;
+// ── State ─────────────────────────────────────────────────────────────
+let capturing = true; // Auto-start capture for live wingman
+let observer = null;
+let currentGoal = "";
+let soundEnabled = true;
+let isMinimized = false;
+let recentAlerts = [];
 
-/**
- * Initialize the content script
- */
-function init() {
-  console.log('[Hush] Content script initialized on Google Meet');
-  
-  // Load settings from storage
-  chrome.storage.local.get(['backendUrl', 'sessionId', 'isCapturing'], (result) => {
-    if (result.backendUrl) {
-      backendUrl = result.backendUrl;
-    }
-    if (result.sessionId) {
-      sessionId = result.sessionId;
-    } else {
-      // Generate new session ID
-      sessionId = `meet-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      chrome.storage.local.set({ sessionId });
-    }
-    
-    // Restore capturing state if it was active
-    if (result.isCapturing) {
-      startCapture();
-    }
-  });
-  
-  // Listen for messages from popup
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('[Hush] Received message:', message);
-    
-    if (message.action === 'startCapture') {
-      startCapture();
-      sendResponse({ success: true });
-    } else if (message.action === 'stopCapture') {
-      stopCapture();
-      sendResponse({ success: true });
-    } else if (message.action === 'getStatus') {
-      sendResponse({ 
-        isCapturing, 
-        capturedCount: captionBuffer.length,
-        sessionId 
-      });
-    } else if (message.action === 'updateBackendUrl') {
-      backendUrl = message.url;
-      chrome.storage.local.set({ backendUrl });
-      sendResponse({ success: true });
-    }
-    
-    return true;  // Keep message channel open for async response
-  });
+const lastText = new WeakMap();
+const lastSpeaker = new WeakMap();
+let lineBuffer = [];
+let flushTimer = null;
+const FLUSH_DELAY_MS = 2500;
+const MAX_BUFFER_LINES = 6;
+let lastSentText = "";
+
+// ── Selectors for Google Meet captions & UI ───────────────────────────
+const CAPTION_CONTAINER_SELECTORS = [
+  '[data-caption-container]',
+  '[jsname="tgaKEf"]',
+  '[aria-label*="caption" i]',
+  '[role="region"][aria-label*="caption" i]',
+];
+
+const SPEAKER_SELECTORS = [
+  '[jsname="du16Kb"]',
+  '[data-speaker-name]',
+  '.a4cQT',
+];
+
+function findCaptionContainer() {
+  for (const sel of CAPTION_CONTAINER_SELECTORS) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+  return null;
 }
 
-/**
- * Start capturing captions from Google Meet
- */
-function startCapture() {
-  if (isCapturing) {
-    console.log('[Hush] Already capturing');
-    return;
+// ── Audio chime helper (Web Audio API) ────────────────────────────────
+function playChime() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (e) {
+    // Audio context may require prior interaction
   }
-  
-  console.log('[Hush] Starting caption capture');
-  isCapturing = true;
-  chrome.storage.local.set({ isCapturing: true });
-  
-  // Notify background script
-  chrome.runtime.sendMessage({ 
-    action: 'captureStarted',
-    sessionId 
-  });
-  
-  // Start observing captions
-  observeCaptions();
-  
-  // Start batch processing timer
-  batchTimer = setInterval(processCaptionBatch, CONFIG.batchInterval);
 }
 
-/**
- * Stop capturing captions
- */
-function stopCapture() {
-  if (!isCapturing) {
-    return;
-  }
-  
-  console.log('[Hush] Stopping caption capture');
-  isCapturing = false;
-  chrome.storage.local.set({ isCapturing: false });
-  
-  // Send any remaining captions
-  if (captionBuffer.length > 0) {
-    processCaptionBatch();
-  }
-  
-  // Clear timers and observers
-  if (batchTimer) {
-    clearInterval(batchTimer);
-    batchTimer = null;
-  }
-  
-  if (captionObserver) {
-    captionObserver.disconnect();
-    captionObserver = null;
-  }
-  
-  // Notify background script
-  chrome.runtime.sendMessage({ action: 'captureStopped' });
-}
+// ── Google Meet Chat Helper ───────────────────────────────────────────
+function pasteToMeetChat(text) {
+  if (!text) return false;
 
-/**
- * Observe Google Meet caption elements for changes
- */
-function observeCaptions() {
-  // Google Meet caption selectors (may need updates if Google changes their DOM)
-  const captionSelectors = [
-    '[jsname="YSxPC"]',  // Main caption container
-    '.a4cQT',            // Caption text elements
-    '[jscontroller="qXszGb"]'  // Alternative caption container
-  ];
-  
-  // Try to find caption container
-  const findCaptionContainer = () => {
-    for (const selector of captionSelectors) {
-      const container = document.querySelector(selector);
-      if (container) {
-        return container;
-      }
+  // 1. Check if chat drawer is open; if not, open it
+  let chatInput = document.querySelector('textarea[aria-label*="Send a message" i], textarea[name="chatTextInput"], textarea[aria-label*="chat" i]');
+  if (!chatInput) {
+    const chatBtn = document.querySelector('button[aria-label*="chat" i], [data-panel-id="2"], button[aria-label*="Chat with everyone" i]');
+    if (chatBtn) {
+      chatBtn.click();
     }
-    return null;
-  };
-  
-  // Wait for captions to appear and start observing
-  const checkForCaptions = setInterval(() => {
-    const captionContainer = findCaptionContainer();
-    
-    if (captionContainer) {
-      console.log('[Hush] Found caption container:', captionContainer);
-      clearInterval(checkForCaptions);
-      
-      // Create MutationObserver to watch for caption changes
-      captionObserver = new MutationObserver((mutations) => {
-        if (!isCapturing) return;
-        
-        const captionText = extractCaptionText(captionContainer);
-        if (captionText && captionText !== lastCaptionText) {
-          console.log('[Hush] New caption:', captionText);
-          lastCaptionText = captionText;
-          captionBuffer.push({
-            text: captionText,
-            timestamp: new Date().toISOString()
-          });
-          
-          // Notify popup of new caption
-          chrome.runtime.sendMessage({ 
-            action: 'newCaption',
-            caption: captionText 
-          });
-        }
-      });
-      
-      // Start observing
-      captionObserver.observe(captionContainer, {
-        childList: true,
-        subtree: true,
-        characterData: true
-      });
-      
-      console.log('[Hush] Caption observer started');
-    }
-  }, CONFIG.captionCheckInterval);
-  
-  // Stop checking after 30 seconds if captions not found
+  }
+
+  // 2. Retry finding the chat input after short delay
   setTimeout(() => {
-    clearInterval(checkForCaptions);
-    if (!captionObserver) {
-      console.warn('[Hush] Captions not found after 30 seconds. Make sure captions are enabled in Google Meet.');
-      chrome.runtime.sendMessage({ 
-        action: 'error',
-        error: 'Captions not found. Please enable captions in Google Meet (Settings > Captions).' 
-      });
+    chatInput = document.querySelector('textarea[aria-label*="Send a message" i], textarea[name="chatTextInput"], textarea[aria-label*="chat" i], div[contenteditable="true"][aria-label*="Send a message" i]');
+    if (chatInput) {
+      chatInput.focus();
+      if (chatInput.tagName.toLowerCase() === "textarea" || chatInput.tagName.toLowerCase() === "input") {
+        chatInput.value = text;
+        chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        chatInput.textContent = text;
+        chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return true;
     }
-  }, 30000);
+    // Fallback: copy to clipboard
+    navigator.clipboard.writeText(text);
+  }, 250);
+
+  return true;
 }
 
-/**
- * Extract caption text from the caption container
- */
-function extractCaptionText(container) {
-  if (!container) return '';
-  
-  // Try different methods to extract text
-  const textElements = container.querySelectorAll('.a4cQT, [jsname="tgaKEf"]');
-  if (textElements.length > 0) {
-    const texts = Array.from(textElements).map(el => el.textContent.trim());
-    return texts.filter(t => t).join(' ');
-  }
-  
-  // Fallback to container text
-  return container.textContent.trim();
+// ── Inject Floating In-Meeting HUD Overlay ─────────────────────────────
+function injectMeetingHUD() {
+  if (document.getElementById("meet-copilot-hud-root")) return;
+
+  const root = document.createElement("div");
+  root.id = "meet-copilot-hud-root";
+  root.innerHTML = `
+    <style>
+      #meet-copilot-hud-root {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        z-index: 9999999;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+        font-size: 13px;
+        color: #f1f5f9;
+        pointer-events: none;
+      }
+      .mc-hud {
+        pointer-events: auto;
+        width: 360px;
+        background: rgba(15, 23, 42, 0.94);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255,255,255,0.05);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: transform 0.2s ease, opacity 0.2s ease;
+      }
+      .mc-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: rgba(30, 41, 59, 0.7);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        cursor: grab;
+        user-select: none;
+      }
+      .mc-title {
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: -0.2px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mc-pulse-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        box-shadow: 0 0 8px #22c55e;
+      }
+      .mc-pulse-dot.waiting { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+      .mc-pulse-dot.alerting { background: #eab308; animation: mc-blink 0.8s infinite; }
+      @keyframes mc-blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } }
+
+      .mc-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mc-btn-icon {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+      }
+      .mc-btn-icon:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+      /* Goal section */
+      .mc-goal-sec {
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: rgba(15, 23, 42, 0.5);
+      }
+      .mc-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+        margin-bottom: 5px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .mc-goal-input-box {
+        display: flex;
+        gap: 6px;
+      }
+      .mc-input {
+        flex: 1;
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: #fff;
+        font-size: 12px;
+        outline: none;
+      }
+      .mc-input:focus { border-color: #38bdf8; }
+      .mc-btn-primary {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .mc-btn-primary:hover { background: #1d4ed8; }
+
+      .mc-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .mc-chip {
+        background: rgba(51, 65, 85, 0.6);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 99px;
+        padding: 2px 8px;
+        font-size: 10px;
+        color: #cbd5e1;
+        cursor: pointer;
+      }
+      .mc-chip:hover { background: rgba(59, 130, 246, 0.3); color: #93c5fd; }
+
+      /* Alert Card Section */
+      .mc-body {
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 380px;
+        overflow-y: auto;
+      }
+
+      .mc-card {
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: rgba(30, 41, 59, 0.7);
+        border: 1px solid rgba(255,255,255,0.08);
+        transition: all 0.25s ease;
+      }
+      .mc-card.focus-alert {
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid #f59e0b;
+        box-shadow: 0 0 16px rgba(245, 158, 11, 0.2);
+        animation: mc-card-pop 0.3s ease;
+      }
+      .mc-card.ask-doubt {
+        background: rgba(34, 197, 94, 0.12);
+        border: 1px solid #22c55e;
+        box-shadow: 0 0 16px rgba(34, 197, 94, 0.2);
+        animation: mc-card-pop 0.3s ease;
+      }
+      .mc-card.goal-resolved {
+        background: rgba(59, 130, 246, 0.12);
+        border: 1px solid #3b82f6;
+      }
+      @keyframes mc-card-pop { from { transform: scale(0.97); opacity: 0.5; } to { transform: scale(1); opacity: 1; } }
+
+      .mc-card-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 6px;
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .mc-badge-focus { color: #f59e0b; }
+      .mc-badge-doubt { color: #22c55e; }
+      .mc-badge-resolved { color: #38bdf8; }
+
+      .mc-card-summary {
+        font-size: 12px;
+        line-height: 1.45;
+        color: #e2e8f0;
+        margin-bottom: 8px;
+      }
+      .mc-doubt-quote {
+        background: rgba(15, 23, 42, 0.6);
+        border-left: 3px solid #22c55e;
+        padding: 6px 10px;
+        border-radius: 0 6px 6px 0;
+        font-style: italic;
+        font-size: 12px;
+        color: #f8fafc;
+        margin-bottom: 8px;
+      }
+
+      .mc-btn-row {
+        display: flex;
+        gap: 6px;
+      }
+      .mc-btn-sm {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 6px;
+        padding: 4px 9px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #e2e8f0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: background 0.15s;
+      }
+      .mc-btn-sm:hover { background: rgba(255,255,255,0.18); color: #fff; }
+      .mc-btn-sm.primary { background: #16a34a; border-color: #22c55e; }
+      .mc-btn-sm.primary:hover { background: #15803d; }
+
+      /* Footer status */
+      .mc-footer {
+        padding: 6px 12px;
+        background: rgba(15, 23, 42, 0.8);
+        border-top: 1px solid rgba(255,255,255,0.06);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #64748b;
+      }
+
+      /* Collapsed Pill */
+      .mc-pill {
+        display: none;
+        pointer-events: auto;
+        cursor: pointer;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(255,255,255,0.2);
+        padding: 8px 14px;
+        border-radius: 99px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 12px;
+        transition: transform 0.15s ease;
+      }
+      .mc-pill:hover { transform: scale(1.04); }
+      .mc-pill.has-alert {
+        border-color: #f59e0b;
+        animation: mc-pill-glow 1.5s infinite;
+      }
+      @keyframes mc-pill-glow { 0%, 100% { box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); } 50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.8); } }
+    </style>
+
+    <!-- Collapsed Pill View -->
+    <div id="mc-pill-view" class="mc-pill">
+      <span class="mc-pulse-dot" id="mc-pill-dot"></span>
+      <span id="mc-pill-text">🎯 Meeting Copilot</span>
+    </div>
+
+    <!-- Main Expanded HUD -->
+    <div id="mc-main-hud" class="mc-hud">
+      <div class="mc-header" id="mc-drag-handle">
+        <span class="mc-pulse-dot" id="mc-status-dot"></span>
+        <span class="mc-title">🎯 Meeting Copilot</span>
+        <div class="mc-actions">
+          <button class="mc-btn-icon" id="mc-toggle-sound" title="Toggle audio alert">🔔</button>
+          <button class="mc-btn-icon" id="mc-btn-min" title="Minimize to pill">─</button>
+        </div>
+      </div>
+
+      <!-- Aim / Goal Setter -->
+      <div class="mc-goal-sec">
+        <div class="mc-label">
+          <span>Your Meeting Aim / Question</span>
+          <span id="mc-goal-status" style="color:#38bdf8;">Listening</span>
+        </div>
+        <div class="mc-goal-input-box">
+          <input type="text" id="mc-goal-input" class="mc-input" placeholder="e.g. Ask if deadline can move to Friday..." />
+          <button id="mc-btn-save-goal" class="mc-btn-primary">Set Aim</button>
+        </div>
+        <div class="mc-chips">
+          <span class="mc-chip" data-goal="Ask about project deadline and schedule">🕒 Deadline</span>
+          <span class="mc-chip" data-goal="Clarify who owns the authentication service">👤 Ownership</span>
+          <span class="mc-chip" data-goal="Inquire about budget limits and cost impact">💰 Budget</span>
+          <span class="mc-chip" data-goal="Ask about API migration testing plan">❓ API Migration</span>
+        </div>
+      </div>
+
+      <!-- Live Wingman Card Feed -->
+      <div class="mc-body" id="mc-card-feed">
+        <div class="mc-card" id="mc-active-card">
+          <div class="mc-card-header">
+            <span>👂 Monitoring Meeting</span>
+          </div>
+          <div class="mc-card-summary">
+            Set your meeting aim above. When the discussion turns to your topic or someone pauses, your copilot will alert you here.
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Info -->
+      <div class="mc-footer">
+        <span id="mc-cc-status">Captions: Checking...</span>
+        <span>Strands Decider 2B</span>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(root);
+  setupHUDInteractions();
 }
 
-/**
- * Process and send batched captions to backend
- */
-async function processCaptionBatch() {
-  if (captionBuffer.length === 0) return;
-  
-  // Get captions to send
-  const captions = [...captionBuffer];
-  captionBuffer = [];
-  
-  // Format as transcript
-  const transcript = captions.map(c => c.text).join('\n');
-  
-  console.log('[Hush] Sending batch:', { count: captions.length, transcript });
-  
-  try {
-    await sendToBackend(transcript);
-  } catch (error) {
-    console.error('[Hush] Failed to send captions:', error);
-    // Put captions back in buffer for retry
-    captionBuffer = captions.concat(captionBuffer);
-  }
-}
+// ── Setup HUD Click & Drag Handlers ────────────────────────────────────
+function setupHUDInteractions() {
+  const root = document.getElementById("meet-copilot-hud-root");
+  const mainHud = document.getElementById("mc-main-hud");
+  const pillView = document.getElementById("mc-pill-view");
+  const btnMin = document.getElementById("mc-btn-min");
+  const toggleSound = document.getElementById("mc-toggle-sound");
+  const goalInput = document.getElementById("mc-goal-input");
+  const btnSaveGoal = document.getElementById("mc-btn-save-goal");
+  const dragHandle = document.getElementById("mc-drag-handle");
 
-/**
- * Send transcript to Hush backend with retry logic
- */
-async function sendToBackend(transcript, retryCount = 0) {
-  const apiUrl = `${backendUrl}/api/chat`;
-  
-  try {
-    console.log('[Hush] Sending to backend:', apiUrl);
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: transcript,
-        session_id: sessionId,
-        images: []
-      })
+  // Load existing goal from storage
+  chrome.storage.local.get(["meeting_goal", "sound_enabled"], (data) => {
+    if (data.meeting_goal) {
+      currentGoal = data.meeting_goal;
+      goalInput.value = currentGoal;
+      updatePillText();
+    }
+    if (data.sound_enabled !== undefined) {
+      soundEnabled = data.sound_enabled;
+      toggleSound.textContent = soundEnabled ? "🔔" : "🔕";
+    }
+  });
+
+  // Minimize / Expand toggles
+  btnMin.addEventListener("click", () => {
+    isMinimized = true;
+    mainHud.style.display = "none";
+    pillView.style.display = "flex";
+  });
+
+  pillView.addEventListener("click", () => {
+    isMinimized = false;
+    mainHud.style.display = "flex";
+    pillView.style.display = "none";
+    pillView.classList.remove("has-alert");
+  });
+
+  toggleSound.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    toggleSound.textContent = soundEnabled ? "🔔" : "🔕";
+    chrome.storage.local.set({ sound_enabled: soundEnabled });
+  });
+
+  // Goal save
+  btnSaveGoal.addEventListener("click", () => {
+    saveGoal(goalInput.value.trim());
+  });
+  goalInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveGoal(goalInput.value.trim());
+  });
+
+  // Preset chips
+  document.querySelectorAll(".mc-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      goalInput.value = chip.dataset.goal;
+      saveGoal(chip.dataset.goal);
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  });
+
+  // Draggable HUD
+  let isDragging = false;
+  let startX, startY, origX, origY;
+
+  dragHandle.addEventListener("mousedown", (e) => {
+    if (e.target.closest("button")) return;
+    isDragging = true;
+    dragHandle.style.cursor = "grabbing";
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = root.getBoundingClientRect();
+    origX = rect.left;
+    origY = rect.top;
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    root.style.top = `${Math.max(10, origY + dy)}px`;
+    root.style.left = `${Math.max(10, origX + dx)}px`;
+    root.style.right = "auto";
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      dragHandle.style.cursor = "grab";
     }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(data.error);
-    }
-    
-    console.log('[Hush] Backend response:', data);
-    
-    // Send response to background script for popup display
-    chrome.runtime.sendMessage({
-      action: 'backendResponse',
-      data: {
-        reply: data.reply,
-        decisions: data.decisions || [],
-        latency_ms: data.latency_ms,
-        model_id: data.model_id
+  });
+}
+
+function saveGoal(goal) {
+  currentGoal = goal;
+  const statusEl = document.getElementById("mc-goal-status");
+  if (statusEl) statusEl.textContent = goal ? "Aim Locked" : "No Aim";
+  chrome.runtime.sendMessage({ type: "HUSH_SET_GOAL", goal });
+  updatePillText();
+
+  // Reset feed
+  renderActiveCard({
+    nudge_type: "STAY_SILENT",
+    wake_up_summary: goal ? `Aim set: "${goal}". Listening to Google Meet captions...` : "Monitoring meeting.",
+  });
+}
+
+function updatePillText() {
+  const pillText = document.getElementById("mc-pill-text");
+  if (pillText) {
+    pillText.textContent = currentGoal ? `🎯 Aim: ${currentGoal.slice(0, 24)}...` : "🎯 Meeting Copilot";
+  }
+}
+
+// ── Render Live Wingman Cards ──────────────────────────────────────────
+function renderActiveCard(record) {
+  const feed = document.getElementById("mc-card-feed");
+  const pillView = document.getElementById("mc-pill-view");
+  const dot = document.getElementById("mc-status-dot");
+  const pillDot = document.getElementById("mc-pill-dot");
+  if (!feed) return;
+
+  const nudge = record.nudge_type || "STAY_SILENT";
+  const speaker = record.speaker || "Speaker";
+  const summary = record.wake_up_summary || "";
+  const doubt = record.suggested_doubt || "";
+  const reason = record.reason || "";
+
+  let cardHtml = "";
+
+  if (nudge === "FOCUS_ALERT") {
+    playChime();
+    if (dot) dot.className = "mc-pulse-dot alerting";
+    if (pillDot) pillDot.className = "mc-pulse-dot alerting";
+    if (pillView) pillView.classList.add("has-alert");
+
+    cardHtml = `
+      <div class="mc-card focus-alert">
+        <div class="mc-card-header mc-badge-focus">
+          <span>⚡ CONTEXT ALERT (Wake Up!)</span>
+        </div>
+        <div class="mc-card-summary">
+          <strong>${speaker}</strong> is discussing your topic:
+          <div style="margin-top:4px;">${summary}</div>
+        </div>
+        ${reason ? `<div style="font-size:11px;color:#cbd5e1;margin-bottom:6px;">💡 ${reason}</div>` : ""}
+      </div>
+    `;
+  } else if (nudge === "ASK_DOUBT") {
+    playChime();
+    if (dot) dot.className = "mc-pulse-dot alerting";
+    if (pillDot) pillDot.className = "mc-pulse-dot alerting";
+    if (pillView) pillView.classList.add("has-alert");
+
+    cardHtml = `
+      <div class="mc-card ask-doubt">
+        <div class="mc-card-header mc-badge-doubt">
+          <span>🎤 ASK YOUR QUESTION NOW</span>
+        </div>
+        <div class="mc-card-summary">
+          <strong>${speaker}</strong> just paused or invited questions.
+        </div>
+        <div class="mc-doubt-quote" id="mc-doubt-text">"${doubt || `Could you clarify how this impacts ${currentGoal}?`}"</div>
+        <div class="mc-btn-row">
+          <button class="mc-btn-sm primary" id="mc-btn-copy-doubt">📋 Copy Question</button>
+          <button class="mc-btn-sm" id="mc-btn-paste-chat">💬 Paste to Meet Chat</button>
+          <button class="mc-btn-sm" id="mc-btn-mark-asked">✅ Mark Asked</button>
+        </div>
+      </div>
+    `;
+  } else if (nudge === "GOAL_RESOLVED") {
+    playChime();
+    cardHtml = `
+      <div class="mc-card goal-resolved">
+        <div class="mc-card-header mc-badge-resolved">
+          <span>🎉 GOAL ADDRESSED</span>
+        </div>
+        <div class="mc-card-summary">
+          ${summary || "Your meeting goal appears to have been answered in this discussion."}
+        </div>
+      </div>
+    `;
+  } else {
+    // Routine talk
+    if (dot) dot.className = "mc-pulse-dot";
+    if (pillDot) pillDot.className = "mc-pulse-dot";
+
+    cardHtml = `
+      <div class="mc-card">
+        <div class="mc-card-header">
+          <span>👂 Monitoring Meeting</span>
+        </div>
+        <div class="mc-card-summary" style="color:#94a3b8;">
+          ${summary || (currentGoal ? `Listening for: "${currentGoal}". Conversation is currently routine.` : "Monitoring live speech.")}
+        </div>
+      </div>
+    `;
+  }
+
+  feed.innerHTML = cardHtml;
+
+  // Bind doubt card buttons if rendered
+  const copyBtn = document.getElementById("mc-btn-copy-doubt");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => {
+      const text = doubt || (document.getElementById("mc-doubt-text") ? document.getElementById("mc-doubt-text").textContent.replace(/"/g, "") : "");
+      navigator.clipboard.writeText(text);
+      copyBtn.textContent = "✓ Copied!";
+      setTimeout(() => { copyBtn.textContent = "📋 Copy Question"; }, 2000);
+    });
+  }
+
+  const pasteBtn = document.getElementById("mc-btn-paste-chat");
+  if (pasteBtn) {
+    pasteBtn.addEventListener("click", () => {
+      const text = doubt || (document.getElementById("mc-doubt-text") ? document.getElementById("mc-doubt-text").textContent.replace(/"/g, "") : "");
+      pasteToMeetChat(text);
+      pasteBtn.textContent = "✓ Inserted in Chat";
+      setTimeout(() => { pasteBtn.textContent = "💬 Paste to Meet Chat"; }, 2500);
+    });
+  }
+
+  const markBtn = document.getElementById("mc-btn-mark-asked");
+  if (markBtn) {
+    markBtn.addEventListener("click", () => {
+      renderActiveCard({
+        nudge_type: "GOAL_RESOLVED",
+        wake_up_summary: "You asked your doubt! Copilot will continue tracking the response."
+      });
+    });
+  }
+}
+
+// ── Google Meet Captions Observation ──────────────────────────────────
+function startObserving() {
+  if (observer) return;
+
+  const container = findCaptionContainer();
+  const ccStatusEl = document.getElementById("mc-cc-status");
+
+  if (!container) {
+    if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#f59e0b;">Turn on CC (Captions)</span>';
+    const bodyObs = new MutationObserver(() => {
+      if (findCaptionContainer()) {
+        bodyObs.disconnect();
+        startObserving();
       }
     });
-    
-    return data;
-    
-  } catch (error) {
-    console.error('[Hush] Backend request failed:', error);
-    
-    // Retry logic
-    if (retryCount < CONFIG.maxRetries) {
-      console.log(`[Hush] Retrying... (${retryCount + 1}/${CONFIG.maxRetries})`);
-      await new Promise(resolve => setTimeout(resolve, CONFIG.retryDelay));
-      return sendToBackend(transcript, retryCount + 1);
+    bodyObs.observe(document.body, { childList: true, subtree: true });
+    sendStatus("waiting");
+    return;
+  }
+
+  if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
+  sendStatus("connected");
+
+  observer = new MutationObserver((mutations) => {
+    if (!capturing) return;
+    mutations.forEach(processMutation);
+  });
+
+  observer.observe(container, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    characterDataOldValue: true,
+  });
+}
+
+function stopObserving() {
+  if (observer) { observer.disconnect(); observer = null; }
+  flushBuffer(true);
+  sendStatus("idle");
+}
+
+function processMutation(mutation) {
+  const node = mutation.target.nodeType === Node.TEXT_NODE
+    ? mutation.target.parentElement
+    : mutation.target;
+  if (!node) return;
+
+  const block = findUtteranceBlock(node);
+  if (!block) return;
+
+  extractAndBuffer(block);
+}
+
+function findUtteranceBlock(el) {
+  let cur = el;
+  for (let i = 0; i < 8 && cur; i++) {
+    if (cur.hasAttribute && (
+      cur.getAttribute('jsname') === 'YSg9Nc' ||
+      cur.getAttribute('data-utterance') !== null ||
+      (cur.children.length >= 1 && cur.textContent.trim().length > 0)
+    )) {
+      return cur;
     }
-    
-    // Send error to popup
-    chrome.runtime.sendMessage({
-      action: 'error',
-      error: `Failed to connect to backend: ${error.message}`
-    });
-    
-    throw error;
+    cur = cur.parentElement;
+  }
+  return el;
+}
+
+function extractAndBuffer(block) {
+  const speaker = extractSpeaker(block);
+  const text    = extractText(block, speaker);
+  if (!text) return;
+
+  const prev = lastText.get(block) || "";
+  const prevSpeaker = lastSpeaker.get(block) || "";
+
+  lastText.set(block, text);
+  lastSpeaker.set(block, speaker);
+
+  if (prev && prev !== text && text.length - prev.length > 25) {
+    commitLine(prevSpeaker || speaker, prev);
   }
 }
 
-/**
- * Check if we're on a Google Meet call page
- */
-function isOnMeetCall() {
-  return window.location.pathname.match(/^\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
+function extractSpeaker(block) {
+  for (const sel of SPEAKER_SELECTORS) {
+    const el = block.querySelector(sel);
+    if (el && el.textContent.trim()) return el.textContent.trim();
+  }
+  const firstSpan = block.querySelector("span");
+  if (firstSpan) {
+    const t = firstSpan.textContent.trim();
+    if (t.length < 40 && !/[.,!?]/.test(t)) return t;
+  }
+  return "";
 }
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+function extractText(block, speaker) {
+  let raw = block.textContent.trim();
+  if (speaker && raw.startsWith(speaker)) {
+    raw = raw.slice(speaker.length).trim();
+  }
+  return raw;
+}
+
+function commitLine(speaker, text) {
+  const clean = text.trim();
+  if (!clean || clean === lastSentText) return;
+  lastSentText = clean;
+
+  const line = speaker ? `[${speaker}]: ${clean}` : clean;
+  lineBuffer.push(line);
+
+  if (lineBuffer.length >= MAX_BUFFER_LINES) {
+    flushBuffer(false);
+  } else {
+    scheduleFlush();
+  }
+}
+
+function scheduleFlush() {
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => flushBuffer(false), FLUSH_DELAY_MS);
+}
+
+function flushBuffer(force) {
+  clearTimeout(flushTimer);
+  if (lineBuffer.length === 0) return;
+  const segment = lineBuffer.join("\n");
+  lineBuffer = [];
+
+  chrome.runtime.sendMessage({
+    type: "HUSH_SEGMENT",
+    segment,
+    goal: currentGoal,
+    ts: Date.now(),
+  });
+}
+
+// ── Messages from Background / Popup ──────────────────────────────────
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "WINGMAN_NUDGE" && msg.record) {
+    renderActiveCard(msg.record);
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "WINGMAN_GOAL_UPDATED") {
+    currentGoal = msg.goal || "";
+    const input = document.getElementById("mc-goal-input");
+    if (input) input.value = currentGoal;
+    updatePillText();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "WINGMAN_ERROR") {
+    const cc = document.getElementById("mc-cc-status");
+    if (cc) cc.innerHTML = `<span style="color:#ef4444;" title="${msg.message}">Backend error</span>`;
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "HUSH_START") {
+    capturing = true;
+    startObserving();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "HUSH_STOP") {
+    capturing = false;
+    stopObserving();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "HUSH_STATUS_REQ") {
+    sendResponse({
+      capturing,
+      hasContainer: !!findCaptionContainer(),
+      goal: currentGoal,
+    });
+    return true;
+  }
+});
+
+function sendStatus(status) {
+  chrome.runtime.sendMessage({ type: "HUSH_CONTENT_STATUS", status }).catch(() => {});
+}
+
+// ── Initialise on Google Meet ─────────────────────────────────────────
+function init() {
+  injectMeetingHUD();
+  startObserving();
+  chrome.runtime.sendMessage({ type: "HUSH_CONTENT_READY" }).catch(() => {});
+}
+
+// Run when DOM is ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
 } else {
   init();
 }
-
-// Handle page navigation within Meet
-let lastUrl = location.href;
-new MutationObserver(() => {
-  const currentUrl = location.href;
-  if (currentUrl !== lastUrl) {
-    lastUrl = currentUrl;
-    if (isOnMeetCall()) {
-      console.log('[Hush] Navigated to Meet call');
-      // Reset caption observer
-      if (isCapturing) {
-        stopCapture();
-        setTimeout(startCapture, 1000);
-      }
-    }
-  }
-}).observe(document, { subtree: true, childList: true });

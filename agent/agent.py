@@ -103,6 +103,142 @@ class HackathonAgent:
             "eager": self.eager,
         }
 
+    def evaluate_wingman(
+        self,
+        segment: str,
+        goal: str = "",
+        session_id: str = "meeting",
+        context: str = "",
+    ) -> dict[str, Any]:
+        """Real-time wingman evaluation for an attendee during live meetings.
+
+        Answers:
+        1. Did the conversation shift to the attendee's goal? (FOCUS_ALERT / wake-up summary)
+        2. Is this an opportune moment to ask their doubt? (ASK_DOUBT / suggested question)
+        3. Was the attendee's goal resolved? (GOAL_RESOLVED)
+        4. Should it stay silent to avoid distracting the attendee? (STAY_SILENT)
+        """
+        import json
+        import re
+
+        clean_segment = segment.strip()
+        clean_goal = goal.strip()
+
+        if not clean_segment:
+            return {"error": "segment is empty"}
+
+        if not clean_goal:
+            return {
+                "nudge_type": "STAY_SILENT",
+                "goal_relevance": "NONE",
+                "wake_up_summary": "",
+                "suggested_doubt": "",
+                "reason": "No meeting goal set. Enter your aim to activate personal alerts.",
+                "goal_status": "pending",
+                "decisions": [],
+            }
+
+        # Format state for Strands Decider 2B
+        state = (
+            f"Attendee Goal: {clean_goal}\n\n"
+            f"--- LIVE MEETING TRANSCRIPT ---\n{clean_segment}\n\n"
+            f"Prior Context: {context or 'None'}"
+        )
+
+        wingman_qs = {
+            "is_goal_relevant": Decider.noul(
+                f"Does this meeting transcript relate to or touch upon the attendee's goal: '{clean_goal}'?",
+                {
+                    "true": "the segment discusses topics directly related to the user's goal",
+                    "false": "the segment is routine or completely unrelated to the user's goal",
+                },
+            ),
+            "wingman_cue": Decider.choice(
+                f"What live wingman cue should be displayed to the attendee right now regarding their goal '{clean_goal}'?",
+                {
+                    "FOCUS_ALERT": "the discussion just shifted to or highlights the attendee's goal; alert the user immediately so they refocus",
+                    "ASK_DOUBT": "the speaker finished making a point, paused, or invited questions, offering an opportune moment to ask a doubt",
+                    "GOAL_RESOLVED": "the key information or question the attendee wanted was answered or resolved in this turn",
+                    "STAY_SILENT": "routine conversation or not the right moment; stay silent so the attendee is not disturbed",
+                },
+            ),
+        }
+
+        decisions_record = []
+        is_rel = False
+        cue = "STAY_SILENT"
+
+        try:
+            answers = self.decider.ask(state, wingman_qs)
+            rel_dec = answers["is_goal_relevant"]
+            cue_dec = answers["wingman_cue"]
+            is_rel = rel_dec.yes
+            raw_cue = cue_dec.label or "STAY_SILENT"
+            # If the segment is not relevant to the user's goal, stay silent so the attendee is not disturbed
+            cue = raw_cue if is_rel else "STAY_SILENT"
+            decisions_record.append({
+                "pattern": "#wingman",
+                "goal_relevant": rel_dec.yes,
+                "goal_rel_conf": round(rel_dec.confidence, 3),
+                "cue": cue,
+                "cue_conf": round(cue_dec.confidence, 3),
+                "decider_ms": round(self.decider.last_latency_ms or 0),
+            })
+        except Exception:
+            # Heuristic fallback if network/decider is unavailable
+            text_lower = clean_segment.lower()
+            goal_words = [w.lower() for w in re.findall(r"\w+", clean_goal) if len(w) > 3]
+            overlap = any(w in text_lower for w in goal_words)
+            is_rel = overlap
+            if not is_rel:
+                cue = "STAY_SILENT"
+            elif any(q in text_lower for q in ["question", "doubt", "what do you think", "any thoughts", "?", "makes sense"]):
+                cue = "ASK_DOUBT"
+            else:
+                cue = "FOCUS_ALERT"
+
+        speakers = re.findall(r"\[?([A-Za-z][A-Za-z ]{1,30})\]?:", clean_segment)
+        active_speaker = speakers[-1] if speakers else "The speaker"
+
+        wake_up_summary = ""
+        suggested_doubt = ""
+        reason = ""
+        goal_status = "in_progress" if is_rel else "pending"
+
+        # Extract the most salient utterance from the segment
+        turns = [l.strip() for l in clean_segment.splitlines() if l.strip()]
+        last_turn = turns[-1] if turns else clean_segment
+        # Strip speaker prefix if present for clean quoting
+        clean_quote = re.sub(r"^\[?[A-Za-z][A-Za-z ]{1,30}\]?:?\s*", "", last_turn)
+
+        wake_up_summary = ""
+        suggested_doubt = ""
+        reason = ""
+        goal_status = "in_progress" if is_rel else "pending"
+
+        if cue == "FOCUS_ALERT":
+            wake_up_summary = f"{active_speaker} just brought up your topic: \"{clean_quote}\""
+            reason = f"Context Alert: '{clean_goal}' is now being actively discussed."
+        elif cue == "ASK_DOUBT":
+            suggested_doubt = f"{active_speaker}, regarding {clean_goal}, could you clarify the timeline and next steps?"
+            wake_up_summary = f"{active_speaker} finished explaining: \"{clean_quote}\""
+            reason = f"Opportune moment to ask doubt: {active_speaker} paused or opened the floor."
+        elif cue == "GOAL_RESOLVED":
+            wake_up_summary = f"{active_speaker} covered key details: \"{clean_quote}\""
+            reason = f"Resolution detected: details relating to '{clean_goal}' were addressed."
+            goal_status = "resolved"
+
+        return {
+            "nudge_type": cue,
+            "goal_relevance": "HIGH" if is_rel else "NONE",
+            "wake_up_summary": wake_up_summary,
+            "suggested_doubt": suggested_doubt,
+            "speaker": active_speaker,
+            "reason": reason,
+            "goal_status": goal_status,
+            "decisions": decisions_record,
+        }
+
 
 if __name__ == "__main__":
     import json

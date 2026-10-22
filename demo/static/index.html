@@ -3,84 +3,779 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hush — meeting transcript guardrails</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<title>Hush &mdash; AI Meeting Companion</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0B1020; --panel:#121A2E; --line:#223052; --ink:#E7ECF6; --mute:#8D9AB5; --orange:#FF9900; --green:#34D399; --red:#F87171; --amber:#FBBF24; --blue:#60A5FA; }
-  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font:15px Inter, system-ui, sans-serif; }
-  header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); }
-  header .dot { width:10px; height:10px; border-radius:50%; background:var(--orange); box-shadow:0 0 12px var(--orange); }
-  header h1 { font-size:18px; margin:0; } header .meta { color:var(--mute); font-size:13px; margin-left:auto; }
-  main { display:grid; grid-template-columns:1.1fr 1fr; gap:18px; padding:18px 22px; height:calc(100vh - 60px); }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; min-height:0; }
-  .card h2 { margin:0 0 10px; font-size:14px; color:var(--mute); text-transform:uppercase; letter-spacing:.08em; }
-  #log { flex:1; overflow:auto; display:flex; flex-direction:column; gap:10px; }
-  .msg { padding:10px 13px; border-radius:12px; max-width:88%; line-height:1.45; white-space:pre-wrap; }
-  .user { align-self:flex-end; background:#1E2A47; } .bot { align-self:flex-start; background:#18243B; border:1px solid var(--line); }
-  .bot .t { color:var(--mute); font-size:12px; margin-top:6px; }
-  form { display:flex; gap:10px; margin-top:12px; } input { flex:1; background:#0F1628; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit; }
-  button { background:var(--orange); color:#111; border:0; border-radius:10px; padding:0 18px; font-weight:700; cursor:pointer; }
-  #dec { flex:1; overflow:auto; display:flex; flex-direction:column; gap:12px; }
-  .d { border:1px solid var(--line); border-radius:12px; padding:12px; background:#0F1628; animation:pop .35s ease; }
-  @keyframes pop { from { transform:scale(.97); opacity:.2; } to { transform:none; opacity:1; } }
-  .d .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-weight:700; }
-  .tag { font:12px 'JetBrains Mono', monospace; padding:2px 9px; border-radius:99px; border:1px solid var(--line); }
-  .proceed { color:var(--green); border-color:var(--green); } .guide, .review { color:var(--amber); border-color:var(--amber); }
-  .deny, .block { color:var(--red); border-color:var(--red); } .confirm { color:var(--blue); border-color:var(--blue); }
-  .row { display:grid; grid-template-columns:150px 1fr 54px; gap:10px; align-items:center; font:13px 'JetBrains Mono', monospace; margin:5px 0; }
-  .bar { height:10px; background:#1B2540; border-radius:99px; overflow:hidden; } .bar i { display:block; height:100%; border-radius:99px; }
-  .kv { color:var(--mute); font:12px 'JetBrains Mono', monospace; margin-top:6px; word-break:break-all; }
-  .empty { color:var(--mute); } .credit { color:var(--mute); font-size:12px; margin-top:8px; }
-  .clip { display:flex; align-items:center; padding:0 12px; border:1px solid var(--line); border-radius:10px; cursor:pointer; font-size:18px; }
-  .att { display:flex; gap:8px; margin-top:10px; } .att img, .msg img { height:64px; border-radius:8px; border:1px solid var(--line); }
-  .msg img { height:120px; display:block; margin-bottom:6px; }
+/* -- tokens ------------------------------------------------------- */
+:root{
+  --bg:#080E1C; --surf:#0F1829; --raised:#141F33;
+  --b1:#1E2E4A;  --b2:#2A3E60;
+  --ink:#E4EAF6; --ink2:#98A8C5; --ink3:#5A6E8C;
+  --orange:#FF9900; --orange2:#E68800;
+  --green:#22C55E; --red:#EF4444; --amber:#F59E0B; --blue:#3B82F6;
+  --r:12px; --r2:8px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,sans-serif;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:99px}
+
+/* -- topbar -------------------------------------------------------- */
+.topbar{
+  flex-shrink:0;height:52px;
+  display:flex;align-items:center;gap:12px;padding:0 18px;
+  background:var(--surf);border-bottom:1px solid var(--b1);
+  z-index:10;
+}
+.tb-logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px;letter-spacing:-.3px;white-space:nowrap}
+.tb-logo .pulse{width:9px;height:9px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px var(--orange);animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* session URL pill */
+.session-pill{
+  display:flex;align-items:center;gap:8px;
+  background:var(--raised);border:1px solid var(--b1);border-radius:99px;
+  padding:5px 12px 5px 10px;min-width:0;flex:1;max-width:340px;
+}
+.s-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);animation:blink 2s infinite}
+.s-dot.idle{background:var(--ink3);animation:none}
+.session-url{
+  flex:1;background:transparent;border:none;outline:none;
+  color:var(--ink2);font:12px Inter,sans-serif;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  cursor:text;
+}
+.session-url::placeholder{color:var(--ink3)}
+
+.tb-right{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+.tb-meta{font-size:11px;color:var(--ink3);white-space:nowrap}
+.btn-sm{
+  background:transparent;border:1px solid var(--b2);border-radius:6px;
+  padding:5px 12px;color:var(--ink2);font:500 12px Inter,sans-serif;
+  cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s;
+}
+.btn-sm:hover{border-color:var(--orange);color:var(--orange)}
+.btn-sm.live{background:var(--green);border-color:var(--green);color:#000}
+.btn-sm.danger:hover{border-color:var(--red);color:var(--red)}
+
+/* -- main columns -------------------------------------------------- */
+.workspace{
+  flex:1;min-height:0;
+  display:grid;
+  grid-template-columns:1fr 380px;
+  grid-template-rows:1fr auto;
+}
+
+/* shared panel base */
+.panel{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--b1)}
+.panel:last-child{border-right:none}
+.ph{
+  flex-shrink:0;padding:10px 16px 9px;
+  border-bottom:1px solid var(--b1);
+  display:flex;align-items:center;gap:8px;
+}
+.ph-title{font-size:11px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.07em}
+.ph-badge{
+  font-size:10px;font-family:'JetBrains Mono',monospace;
+  background:var(--raised);border:1px solid var(--b2);
+  border-radius:99px;padding:1px 8px;color:var(--ink3);
+}
+.ph-actions{display:flex;gap:6px;margin-left:auto}
+
+/* -- LEFT: transcript ---------------------------------------------- */
+#panel-left{background:var(--bg)}
+
+#tx-feed{
+  flex:1;overflow-y:auto;padding:14px 16px;
+  display:flex;flex-direction:column;gap:6px;
+}
+.tx-placeholder{
+  color:var(--ink3);font-size:13px;text-align:center;
+  margin-top:60px;line-height:2.2;
+}
+.tx-placeholder strong{color:var(--ink2)}
+.tx-line{display:flex;gap:10px;align-items:flex-start;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.tx-speaker{
+  font-size:11px;font-weight:600;color:var(--orange);
+  min-width:76px;flex-shrink:0;padding-top:2px;
+  font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.tx-text{font-size:13px;color:var(--ink);line-height:1.55}
+.tx-ts{font-size:10px;color:var(--ink3);margin-left:6px;font-family:'JetBrains Mono',monospace}
+.tx-divider{
+  font-size:11px;color:var(--ink3);font-style:italic;
+  padding:6px 0;border-bottom:1px dashed var(--b1);margin:2px 0;
+}
+
+/* segment input */
+.seg-area{
+  flex-shrink:0;padding:12px 14px;
+  border-top:1px solid var(--b1);
+  display:flex;flex-direction:column;gap:8px;
+}
+.seg-ta{
+  background:var(--raised);border:1px solid var(--b1);border-radius:var(--r2);
+  padding:10px 12px;color:var(--ink);font:13px Inter,sans-serif;
+  resize:none;outline:none;min-height:70px;max-height:140px;
+  transition:border-color .15s;
+}
+.seg-ta::placeholder{color:var(--ink3)}
+.seg-ta:focus{border-color:var(--orange)}
+.seg-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-analyse{
+  background:var(--orange);color:#111;border:none;border-radius:var(--r2);
+  padding:9px 18px;font:600 13px Inter,sans-serif;
+  cursor:pointer;transition:background .15s;flex-shrink:0;
+}
+.btn-analyse:hover{background:var(--orange2)}
+.btn-analyse:disabled{opacity:.4;cursor:default}
+.seg-hint{font-size:11px;color:var(--ink3)}
+.kbd{
+  font-size:10px;font-family:'JetBrains Mono',monospace;
+  background:var(--raised);border:1px solid var(--b2);
+  border-radius:4px;padding:1px 5px;color:var(--ink3);
+}
+
+/* -- RIGHT: decisions ---------------------------------------------- */
+#panel-right{background:var(--surf)}
+
+#dec-feed{
+  flex:1;overflow-y:auto;padding:10px 12px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.dec-placeholder{color:var(--ink3);font-size:12px;text-align:center;margin-top:36px;line-height:2}
+
+/* decision card */
+.dc{
+  background:var(--raised);border:1px solid var(--b1);border-radius:var(--r);
+  padding:12px 13px;animation:pop .3s ease;
+}
+@keyframes pop{from{transform:scale(.97);opacity:.2}to{transform:none;opacity:1}}
+.dc.vp{border-left:3px solid var(--green)}
+.dc.vg{border-left:3px solid var(--amber)}
+.dc.vc{border-left:3px solid var(--blue)}
+.dc.vd{border-left:3px solid var(--red)}
+
+.dc-head{display:flex;align-items:center;gap:7px;margin-bottom:9px;flex-wrap:wrap}
+.dc-action{
+  font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;
+  padding:2px 9px;border-radius:99px;border:1px solid;
+}
+.a-INTERJECT  {color:var(--amber);border-color:var(--amber)}
+.a-TAKE_NOTE  {color:var(--blue);border-color:var(--blue)}
+.a-STAY_SILENT{color:var(--ink3);border-color:var(--ink3)}
+.dc-verdict{
+  font-size:10px;font-family:'JetBrains Mono',monospace;
+  padding:2px 8px;border-radius:99px;border:1px solid;margin-left:auto;
+}
+.vp .dc-verdict{color:var(--green);border-color:var(--green)}
+.vg .dc-verdict{color:var(--amber);border-color:var(--amber)}
+.vc .dc-verdict{color:var(--blue);border-color:var(--blue)}
+.vd .dc-verdict{color:var(--red);border-color:var(--red)}
+.dc-tool{font-size:10px;color:var(--ink3);font-family:'JetBrains Mono',monospace}
+
+/* prob bars */
+.pb-row{
+  display:grid;grid-template-columns:110px 1fr 36px;gap:8px;
+  align-items:center;margin:3px 0;
+  font:11px 'JetBrains Mono',monospace;
+}
+.pb-label{color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-track{height:5px;background:var(--b1);border-radius:99px;overflow:hidden}
+.pb-track i{display:block;height:100%;border-radius:99px;transition:width .4s ease}
+.pb-val{color:var(--ink2);text-align:right}
+
+/* reason */
+.dc-reason{
+  margin-top:7px;font-size:11px;color:var(--ink2);line-height:1.5;
+  padding-top:7px;border-top:1px solid var(--b1);
+}
+.dc-ms{font-size:10px;color:var(--ink3);margin-top:5px;font-family:'JetBrains Mono',monospace}
+
+/* suggestion / note bubble */
+.dc-bubble{
+  margin-top:8px;border-radius:var(--r2);
+  padding:8px 10px;font-size:12px;color:var(--ink);line-height:1.55;
+}
+.dc-bubble.interject{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)}
+.dc-bubble.note      {background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.22)}
+.dc-bubble strong{
+  display:block;font-size:10px;font-family:'JetBrains Mono',monospace;
+  margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em;
+}
+.dc-bubble.interject strong{color:var(--amber)}
+.dc-bubble.note       strong{color:var(--blue)}
+
+/* confirm control */
+.dc-confirm{margin-top:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.dc-confirm p{font-size:11px;color:var(--ink2);flex:1 1 100%}
+.btn-approve{background:var(--green);color:#000;border:none;border-radius:6px;padding:5px 13px;font:600 11px Inter,sans-serif;cursor:pointer}
+.btn-dismiss{background:transparent;color:var(--ink2);border:1px solid var(--b2);border-radius:6px;padding:5px 13px;font:500 11px Inter,sans-serif;cursor:pointer}
+
+/* silent card */
+.dc.silent{border-left:3px solid var(--ink3);opacity:.75}
+
+/* processing row */
+.proc-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink3);padding:4px 0}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--b2);border-top-color:var(--orange);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* -- BOTTOM: intelligence ------------------------------------------ */
+.intel{
+  grid-column:1/-1;
+  background:var(--surf);border-top:1px solid var(--b1);
+  overflow:hidden;max-height:0;transition:max-height .3s ease;
+}
+.intel.open{max-height:220px}
+.intel-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  height:100%;
+}
+.intel-sec{padding:12px 14px;border-right:1px solid var(--b1);overflow-y:auto}
+.intel-sec:last-child{border-right:none}
+.intel-title{font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+.ii{font-size:11px;color:var(--ink2);margin-bottom:5px;padding-left:10px;position:relative;line-height:1.5}
+.ii::before{content:".";position:absolute;left:0;color:var(--orange)}
+.ii.risk::before{color:var(--red)}
+.ii.note::before{color:var(--blue)}
+.ie{font-size:11px;color:var(--ink3);font-style:italic}
+
+/* intel toggle bar */
+.intel-bar{
+  grid-column:1/-1;
+  display:flex;align-items:center;gap:8px;padding:5px 16px;
+  cursor:pointer;border-top:1px solid var(--b1);
+  background:var(--surf);user-select:none;
+}
+.intel-bar:hover{background:var(--raised)}
+.intel-arrow{font-size:9px;color:var(--ink3);transition:transform .25s}
+.intel-bar.open .intel-arrow{transform:rotate(180deg)}
+.intel-bar-label{font-size:11px;color:var(--ink3);font-weight:500}
+.intel-chips{display:flex;gap:10px;margin-left:auto}
+.ichip{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--ink3);display:flex;align-items:center;gap:4px}
+.icd{width:5px;height:5px;border-radius:50%}
+
+/* -- toast --------------------------------------------------------- */
+.toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--raised);border:1px solid var(--red);border-radius:var(--r2);
+  padding:9px 16px;font-size:12px;color:var(--red);
+  z-index:999;opacity:0;transition:opacity .2s;pointer-events:none;
+  max-width:400px;text-align:center;
+}
+.toast.show{opacity:1}
+
+/* -- responsive ---------------------------------------------------- */
+@media(max-width:820px){
+  .workspace{grid-template-columns:1fr;grid-template-rows:1fr 300px auto}
+  #panel-right{border-top:1px solid var(--b1);border-right:none}
+  .intel-grid{grid-template-columns:repeat(2,1fr)}
+  .tb-meta{display:none}
+}
 </style>
 </head>
 <body>
-<header><span class="dot"></span><h1 id="name">Decider agent</h1><span class="meta" id="meta"></span></header>
-<main>
-  <section class="card"><h2>Conversation</h2><div id="log"></div>
-    <div id="att" class="att"></div>
-    <form id="f"><label class="clip" title="Attach a photo">&#128206;<input id="img" type="file" accept="image/*" multiple hidden></label><input id="m" placeholder="Paste a meeting transcript or ask Hush to check it…" autocomplete="off"><button>Send</button></form></section>
-  <section class="card"><h2>Strands Decider 2B decisions</h2><div id="dec"><p class="empty">Decisions appear here as the agent makes them.</p></div>
-    <div class="credit">Built with the AWS User Group Madurai Strands Decider hackathon kit</div></section>
-</main>
+
+<!-- ======== TOP BAR ======== -->
+<header class="topbar">
+  <div class="tb-logo">
+    <span class="pulse"></span>
+    Meeting Copilot
+  </div>
+
+  <!-- meeting aim / goal -->
+  <div class="session-pill" style="max-width:440px;">
+    <span class="s-dot live" id="s-dot"></span>
+    <input id="session-url" class="session-url" type="text"
+           placeholder="🎯 Set your meeting aim (e.g. Ask if deadline moves to Friday)"
+           autocomplete="off" spellcheck="false"
+           oninput="onAimInput(this.value)">
+  </div>
+
+  <div class="tb-right">
+    <span class="tb-meta" id="tb-meta"></span>
+    <button class="btn-sm live" id="btn-pause" onclick="togglePause()">&#9646;&#9646; Pause</button>
+    <button class="btn-sm danger" onclick="endSession()">End</button>
+  </div>
+</header>
+
+<!-- ======== WORKSPACE ======== -->
+<div class="workspace" id="workspace">
+
+  <!-- LEFT: transcript feed -->
+  <div class="panel" id="panel-left">
+    <div class="ph">
+      <span class="ph-title">Meeting Transcript</span>
+      <span class="ph-badge" id="tx-badge">0 segments</span>
+      <div class="ph-actions">
+        <button class="btn-sm" onclick="clearTx()">Clear</button>
+      </div>
+    </div>
+
+    <div id="tx-feed">
+      <div class="tx-placeholder" id="tx-ph">
+        <strong>Paste a transcript segment below</strong><br>
+        and click <strong>Analyse</strong> to run it through Strands Decider 2B.<br>
+        <br>
+        <span style="font-size:12px">
+          Hush decides: <strong style="color:var(--amber)">INTERJECT</strong>
+          &nbsp;&middot;&nbsp; <strong style="color:var(--blue)">TAKE_NOTE</strong>
+          &nbsp;&middot;&nbsp; <strong style="color:var(--ink3)">STAY_SILENT</strong>
+        </span>
+      </div>
+    </div>
+
+    <div class="seg-area">
+      <textarea id="seg-ta" class="seg-ta" rows="3"
+        placeholder="[Alice]: The NDA with Apex Corp expires Friday &#8212; legal liability is real.&#10;[Bob]: Someone needs to own this before the end of the meeting."></textarea>
+      <div class="seg-controls">
+        <button class="btn-analyse" id="btn-analyse" onclick="analyse()">Analyse Segment</button>
+        <span class="seg-hint" id="seg-hint"></span>
+        <button class="btn-sm" onclick="loadExample()" title="Load an example segment">Load example</button>
+        <span class="kbd" title="Keyboard shortcut">Ctrl+Enter</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Hush decisions -->
+  <div class="panel" id="panel-right">
+    <div class="ph">
+      <span class="ph-title">Hush AI Copilot</span>
+      <span class="ph-badge" id="dec-badge">0 decisions</span>
+      <div class="ph-actions">
+        <button class="btn-sm" onclick="clearDec()">Clear</button>
+      </div>
+    </div>
+
+    <div id="dec-feed">
+      <div class="dec-placeholder" id="dec-ph">
+        Strands Decider 2B decisions<br>appear here as you analyse segments.
+      </div>
+    </div>
+
+    <div style="padding:7px 12px;border-top:1px solid var(--b1);font-size:10px;color:var(--ink3)">
+      Built with the AWS User Group Madurai Strands Decider hackathon kit
+    </div>
+  </div>
+
+  <!-- BOTTOM: intelligence -->
+  <div class="intel" id="intel">
+    <div class="intel-grid">
+      <div class="intel-sec">
+        <div class="intel-title">Notes &amp; Decisions</div>
+        <div id="ii-notes"></div>
+        <div class="ie" id="ii-notes-e">None yet.</div>
+      </div>
+      <div class="intel-sec">
+        <div class="intel-title">Action Items</div>
+        <div id="ii-actions"></div>
+        <div class="ie" id="ii-actions-e">None captured.</div>
+      </div>
+      <div class="intel-sec">
+        <div class="intel-title">Risks &amp; Alerts</div>
+        <div id="ii-risks"></div>
+        <div class="ie" id="ii-risks-e">None flagged.</div>
+      </div>
+      <div class="intel-sec">
+        <div class="intel-title">Suggestions Made</div>
+        <div id="ii-sugg"></div>
+        <div class="ie" id="ii-sugg-e">None yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- intel toggle -->
+  <div class="intel-bar" id="intel-bar" onclick="toggleIntel()" style="grid-column:1/-1">
+    <span class="intel-arrow" id="intel-arrow">&#9650;</span>
+    <span class="intel-bar-label">Meeting Intelligence</span>
+    <div class="intel-chips">
+      <span class="ichip"><span class="icd" style="background:var(--blue)"></span><span id="ic-notes">0 notes</span></span>
+      <span class="ichip"><span class="icd" style="background:var(--red)"></span><span id="ic-risks">0 risks</span></span>
+      <span class="ichip"><span class="icd" style="background:var(--green)"></span><span id="ic-actions">0 actions</span></span>
+      <span class="ichip"><span class="icd" style="background:var(--amber)"></span><span id="ic-sugg">0 suggestions</span></span>
+    </div>
+  </div>
+
+</div><!-- /workspace -->
+
+<div class="toast" id="toast"></div>
+
+<!-- ======== JS ======== -->
 <script>
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const log = document.getElementById("log"), dec = document.getElementById("dec");
-fetch("/api/info").then(r => r.json()).then(i => { document.getElementById("name").textContent = i.agent;
-  document.getElementById("meta").textContent = `LLM: ${i.llm} · Decider: ${i.decider} · ${i.target === "agentcore" ? "on AgentCore Runtime" : "local agent"}`; });
-function add(cls, html) { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; log.appendChild(d); log.scrollTop = 1e9; return d; }
-function decision(rec) {
-  if (dec.querySelector(".empty")) dec.innerHTML = "";
-  const verdict = rec.verdict || rec.action || rec.tier || "";
-  const title = rec.tool ? `before ${rec.tool}` : (rec.stage || rec.pattern || "decision");
-  const probs = Object.entries(rec).filter(([k, v]) => typeof v === "number" && v >= 0 && v <= 1 && !k.endsWith("_ms"));
-  const rest = Object.entries(rec).filter(([k, v]) => !(typeof v === "number" && v >= 0 && v <= 1) && !["verdict", "action", "tool", "stage", "pattern"].includes(k));
-  const color = (v) => v >= 0.5 ? "#34D399" : "#F87171";
-  const el = document.createElement("div"); el.className = "d";
-  el.innerHTML = `<div class="head"><span>${esc(title)} <span class="tag">${esc(rec.pattern || "")}</span></span><span class="tag ${esc(verdict)}">${esc(verdict)}</span></div>` +
-    probs.map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span class="bar"><i style="width:${v * 100}%;background:${color(v)}"></i></span><span>${v.toFixed(2)}</span></div>`).join("") +
-    `<div class="kv">${rest.map(([k, v]) => `${esc(k)}: ${esc(typeof v === "object" ? JSON.stringify(v) : v)}`).join(" · ")}</div>`;
-  dec.prepend(el);
+// -- state ------------------------------------------------
+const S = {
+  sid: 'meeting-' + Date.now(),
+  paused: false,
+  ended:  false,
+  txCount:  0,
+  decCount: 0,
+  busy: false,
+};
+
+const EXAMPLES = [
+  `[Alice]: The NDA with Apex Corp expires this Friday -- if we miss it, legal liability is real.\n[Bob]: Someone needs to own this before the end of the meeting.`,
+  `[Carol]: I will send the Q4 roadmap calendar invite by EOD today.\n[Dave]: Great, I will review the slides before then.`,
+  `[Grace]: The admin password is Summer2024! -- please rotate it after this call.\n[Hank]: Will do.`,
+  `[Eve]: Great meeting everyone, same time next week?\n[Frank]: Works for me.`,
+  `[Iris]: Has anyone followed up with the client about the delayed shipment?\n[Jake]: Not yet -- I thought you were handling it.`,
+  `[Quinn]: The board approved the 2.3 million APAC expansion budget.\n[Rosa]: Keep that off the record until the press release.`,
+];
+let exIdx = 0;
+
+// -- utils -------------------------------------------------
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg, ms=3500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
 }
-let pending = [];  // attached photos as data URLs, sent with the next message
-const att = document.getElementById("att");
-document.getElementById("img").addEventListener("change", async (e) => {
-  for (const f of e.target.files) pending.push(await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(f); }));
-  att.innerHTML = pending.map((u) => `<img src="${u}" alt="attached photo">`).join(""); e.target.value = "";
+
+// -- topbar ------------------------------------------------
+fetch('/api/info').then(r=>r.json()).then(i=>{
+  document.getElementById('tb-meta').textContent =
+    `LLM: ${i.llm} . Decider: ${i.decider}`;
+}).catch(()=>{});
+
+function onAimInput(v) {
+  const dot = document.getElementById('s-dot');
+  dot.className = 's-dot ' + (v.trim() ? 'live' : 'idle');
+  fetch('/api/goal', {
+    method: 'POST',
+    headers: {'content-type':'application/json'},
+    body: JSON.stringify({goal: v.trim()})
+  }).catch(()=>{});
+}
+const onUrlInput = onAimInput;
+
+function togglePause() {
+  if (S.ended) return;
+  S.paused = !S.paused;
+  const btn = document.getElementById('btn-pause');
+  const dot = document.getElementById('s-dot');
+  if (S.paused) {
+    btn.textContent = '&#9654; Resume'; btn.classList.remove('live');
+    dot.className = 's-dot idle';
+  } else {
+    btn.textContent = '&#9646;&#9646; Pause'; btn.classList.add('live');
+    const url = document.getElementById('session-url').value.trim();
+    dot.className = 's-dot ' + (url ? 'live' : 'idle');
+  }
+}
+
+function endSession() {
+  if (!confirm('End this Hush session? In-memory notes will be cleared.')) return;
+  S.ended = true; S.paused = true;
+  document.getElementById('btn-pause').disabled = true;
+  document.getElementById('btn-analyse').disabled = true;
+  document.getElementById('s-dot').className = 's-dot idle';
+  fetch('/api/reset', {method:'POST'});
+  addTxDiv('Session ended.');
+}
+
+// -- transcript feed ---------------------------------------
+function addTxDiv(text) {
+  const feed = document.getElementById('tx-feed');
+  document.getElementById('tx-ph')?.remove();
+  const el = document.createElement('div');
+  el.className = 'tx-divider'; el.textContent = text;
+  feed.appendChild(el);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function addTxLines(segment) {
+  const feed = document.getElementById('tx-feed');
+  document.getElementById('tx-ph')?.remove();
+  const ts = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  segment.trim().split('\n').filter(Boolean).forEach(line => {
+    const m = line.match(/^\[?([A-Za-z][A-Za-z ]{0,39})\]?:\s*(.+)$/);
+    const el = document.createElement('div');
+    el.className = 'tx-line';
+    if (m) {
+      el.innerHTML =
+        `<span class="tx-speaker">${esc(m[1])}</span>` +
+        `<span class="tx-text">${esc(m[2])}<span class="tx-ts">${ts}</span></span>`;
+    } else {
+      el.innerHTML = `<span class="tx-text" style="color:var(--ink2)">${esc(line)}</span>`;
+    }
+    feed.appendChild(el);
+  });
+  S.txCount++;
+  document.getElementById('tx-badge').textContent =
+    S.txCount + (S.txCount === 1 ? ' segment' : ' segments');
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function clearTx() {
+  document.getElementById('tx-feed').innerHTML =
+    '<div class="tx-placeholder" id="tx-ph">' +
+    '<strong>Paste a transcript segment below</strong><br>and click <strong>Analyse</strong>.</div>';
+  S.txCount = 0;
+  document.getElementById('tx-badge').textContent = '0 segments';
+}
+
+// -- decision feed -----------------------------------------
+function probColor(v) {
+  return v >= .7 ? 'var(--green)' : v >= .45 ? 'var(--amber)' : 'var(--red)';
+}
+
+function verdictClass(v) {
+  return {proceed:'vp', guide:'vg', confirm:'vc', deny:'vd'}[v] || 'vp';
+}
+
+function renderDecision(rec) {
+  const feed = document.getElementById('dec-feed');
+  document.getElementById('dec-ph')?.remove();
+
+  const verdict  = (rec.verdict || 'proceed').toLowerCase();
+  const action   = rec.action || 'STAY_SILENT';
+  const conf     = rec.action_confidence ?? null;
+  const sensitive= rec.contains_sensitive ?? null;
+  const ms       = rec.decider_ms ?? null;
+  const tool     = rec.tool || '';
+  const reason   = rec.reason || '';
+  const isSilent = action === 'STAY_SILENT';
+
+  const card = document.createElement('div');
+  card.className = `dc ${verdictClass(verdict)}${isSilent ? ' silent' : ''}`;
+
+  // head
+  let h = `<div class="dc-head">
+    <span class="dc-action a-${esc(action)}">${esc(action.replace('_',' '))}</span>`;
+  if (tool) h += `<span class="dc-tool">${esc(tool)}</span>`;
+  h += `<span class="dc-verdict">${esc(verdict)}</span></div>`;
+
+  // prob bars
+  let bars = '';
+  if (conf !== null) {
+    const c = probColor(conf);
+    bars += `<div class="pb-row">
+      <span class="pb-label">action conf.</span>
+      <span class="pb-track"><i style="width:${(conf*100).toFixed(0)}%;background:${c}"></i></span>
+      <span class="pb-val">${conf.toFixed(2)}</span></div>`;
+  }
+  if (sensitive !== null) {
+    const c = probColor(sensitive);
+    bars += `<div class="pb-row">
+      <span class="pb-label">sensitive</span>
+      <span class="pb-track"><i style="width:${(sensitive*100).toFixed(0)}%;background:${c}"></i></span>
+      <span class="pb-val">${sensitive.toFixed(2)}</span></div>`;
+  }
+
+  const reasonHtml = reason
+    ? `<div class="dc-reason">${esc(reason)}</div>` : '';
+  const msHtml = ms !== null
+    ? `<div class="dc-ms">&#9889; ${Math.round(ms)} ms &middot; Strands Decider 2B</div>` : '';
+
+  // confirm buttons
+  let confirmHtml = '';
+  if (verdict === 'confirm') {
+    confirmHtml = `<div class="dc-confirm">
+      <p>Confidence below threshold &mdash; human review requested.</p>
+      <button class="btn-approve"
+        onclick="this.closest('.dc').className='dc vp';this.parentElement.innerHTML='<span style=color:var(--green)>&#10003; Approved</span>'">
+        Approve</button>
+      <button class="btn-dismiss"
+        onclick="this.closest('.dc').className='dc vd';this.parentElement.innerHTML='<span style=color:var(--ink3)>Dismissed</span>'">
+        Dismiss</button></div>`;
+  }
+
+  card.innerHTML = h + bars + reasonHtml + msHtml + confirmHtml;
+  feed.prepend(card);
+
+  S.decCount++;
+  document.getElementById('dec-badge').textContent =
+    S.decCount + (S.decCount === 1 ? ' decision' : ' decisions');
+}
+
+function renderBubble(type, text) {
+  if (!text) return;
+  const feed = document.getElementById('dec-feed');
+  const el = document.createElement('div');
+  el.className = `dc-bubble ${type}`;
+  el.innerHTML = `<strong>${type === 'note' ? 'Note recorded' : 'Suggestion'}</strong>${esc(text)}`;
+  feed.prepend(el);
+}
+
+function clearDec() {
+  document.getElementById('dec-feed').innerHTML =
+    '<div class="dec-placeholder" id="dec-ph">Strands Decider 2B decisions<br>appear here.</div>';
+  S.decCount = 0;
+  document.getElementById('dec-badge').textContent = '0 decisions';
+}
+
+// -- intelligence panel ------------------------------------
+function toggleIntel() {
+  const panel = document.getElementById('intel');
+  const bar   = document.getElementById('intel-bar');
+  const arrow = document.getElementById('intel-arrow');
+  panel.classList.toggle('open');
+  bar.classList.toggle('open');
+  arrow.innerHTML = panel.classList.contains('open') ? '&#9660;' : '&#9650;';
+}
+
+function refreshIntel(notes, interjections) {
+  const allN  = notes         || [];
+  const allI  = interjections || [];
+
+  const decisions   = allN.filter(n => n.category === 'decision');
+  const commitments = allN.filter(n => n.category === 'commitment');
+  const general     = allN.filter(n => n.category === 'general');
+  const risks       = allN.filter(n => ['risk','pii_flag'].includes(n.category));
+  const actions     = allN.filter(n => n.category === 'action_item');
+
+  function fill(listId, emptyId, items, cssClass) {
+    const el = document.getElementById(listId);
+    const em = document.getElementById(emptyId);
+    el.innerHTML = '';
+    items.forEach(text => {
+      const d = document.createElement('div');
+      d.className = 'ii' + (cssClass ? ' ' + cssClass : '');
+      d.textContent = text;
+      el.appendChild(d);
+    });
+    em.style.display = items.length ? 'none' : '';
+  }
+
+  fill('ii-notes',   'ii-notes-e',
+    [...decisions, ...commitments, ...general].map(n => n.note));
+  fill('ii-actions', 'ii-actions-e',
+    actions.map(n => n.note));
+  fill('ii-risks',   'ii-risks-e',
+    [...risks.map(n => n.note), ...allI.map(i => '&#9888; ' + i.suggestion)], 'risk');
+  fill('ii-sugg',    'ii-sugg-e',
+    allI.map(i => i.suggestion));
+
+  document.getElementById('ic-notes').textContent =
+    (decisions.length + commitments.length + general.length) + ' notes';
+  document.getElementById('ic-risks').textContent =
+    (risks.length + allI.length) + ' risks';
+  document.getElementById('ic-actions').textContent = actions.length + ' actions';
+  document.getElementById('ic-sugg').textContent    = allI.length   + ' suggestions';
+
+  // auto-open when there's something to show
+  const total = allN.length + allI.length;
+  if (total > 0 && !document.getElementById('intel').classList.contains('open')) {
+    toggleIntel();
+  }
+}
+
+function renderWingmanBanner(w) {
+  const feed = document.getElementById('dec-feed');
+  const card = document.createElement('div');
+  const isDoubt = w.nudge_type === 'ASK_DOUBT';
+  const isAlert = w.nudge_type === 'FOCUS_ALERT';
+  const isRes = w.nudge_type === 'GOAL_RESOLVED';
+  card.className = `dc ${isDoubt ? 'vp' : isAlert ? 'vg' : 'vc'}`;
+  card.style.borderLeftWidth = '4px';
+  card.innerHTML = `
+    <div class="dc-head">
+      <span class="dc-action" style="background:${isDoubt ? 'var(--green)' : isAlert ? 'var(--amber)' : 'var(--blue)'};color:#000;font-weight:700;">
+        ${isDoubt ? '🎤 ASK DOUBT NOW' : isAlert ? '⚡ WAKE UP / FOCUS ALERT' : '🎉 GOAL ADDRESSED'}
+      </span>
+      <span class="dc-verdict">${esc(w.speaker || 'Speaker')}</span>
+    </div>
+    <div style="font-size:12px;color:var(--ink);margin:6px 0;line-height:1.45;">
+      ${esc(w.wake_up_summary || '')}
+    </div>
+    ${w.suggested_doubt ? `
+      <div style="background:rgba(0,0,0,0.3);border-left:3px solid var(--green);padding:6px 8px;border-radius:0 4px 4px 0;font-style:italic;font-size:12px;color:#fff;margin:6px 0;">
+        "${esc(w.suggested_doubt)}"
+      </div>
+      <button class="btn-sm" style="margin-top:4px;" onclick="navigator.clipboard.writeText(\`${esc(w.suggested_doubt)}\`);this.textContent='✓ Copied!';">📋 Copy Question</button>
+    ` : ''}
+  `;
+  feed.prepend(card);
+}
+
+// -- analyse ----------------------------------------------
+async function analyse() {
+  if (S.busy || S.paused || S.ended) return;
+  const ta = document.getElementById('seg-ta');
+  const segment = ta.value.trim();
+  if (!segment) { toast('Paste a transcript segment first.'); return; }
+
+  S.busy = true;
+  const btn  = document.getElementById('btn-analyse');
+  const hint = document.getElementById('seg-hint');
+  btn.disabled = true;
+  hint.innerHTML = '<span class="spin"></span> analysing...';
+
+  addTxLines(segment);
+  ta.value = '';
+
+  const feed = document.getElementById('dec-feed');
+  const spin = document.createElement('div');
+  spin.className = 'proc-row'; spin.id = 'proc-spin';
+  spin.innerHTML = '<span class="spin"></span> Strands Decider 2B deciding...';
+  feed.prepend(spin);
+
+  try {
+    const goal = document.getElementById('session-url').value.trim();
+    const res = await fetch('/api/analyse', {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify({segment, goal, session_id: S.sid}),
+    });
+    const out = await res.json();
+
+    document.getElementById('proc-spin')?.remove();
+
+    if (out.error) {
+      toast('Error: ' + out.error);
+      hint.textContent = 'Error.';
+    } else {
+      if (out.wingman && out.wingman.nudge_type !== 'STAY_SILENT') {
+        renderWingmanBanner(out.wingman);
+      }
+      const decs = out.decisions || [];
+      if (decs.length === 0 && (!out.wingman || out.wingman.nudge_type === 'STAY_SILENT')) {
+        renderDecision({
+          pattern: '#guardrails', action: 'STAY_SILENT',
+          verdict: 'proceed', reason: 'No action needed for this segment.',
+        });
+        hint.textContent = 'Stayed silent.';
+      } else {
+        decs.forEach(d => {
+          renderDecision(d);
+          if (d.verdict === 'proceed' || d.verdict === 'confirm') {
+            const a = d.args || {};
+            if (d.tool === 'interject' && a.suggestion) renderBubble('interject', a.suggestion);
+            if (d.tool === 'take_note'  && a.note)       renderBubble('note', a.note);
+          }
+        });
+        hint.textContent = (decs.length || 1) + ' decision made.';
+      }
+      refreshIntel(out.session_notes, out.session_interjections);
+    }
+  } catch(err) {
+    document.getElementById('proc-spin')?.remove();
+    toast('Request failed: ' + err.message);
+    hint.textContent = 'Failed.';
+  } finally {
+    S.busy = false;
+    btn.disabled = false;
+    setTimeout(() => { hint.textContent = ''; }, 4000);
+  }
+}
+
+function loadExample() {
+  document.getElementById('seg-ta').value = EXAMPLES[exIdx % EXAMPLES.length];
+  exIdx++;
+  document.getElementById('seg-ta').focus();
+}
+
+// -- keyboard shortcuts ------------------------------------
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyse(); }
+  if (e.key === 'Escape') document.getElementById('seg-ta')?.blur();
 });
-document.getElementById("f").addEventListener("submit", async (e) => {
-  e.preventDefault(); const m = document.getElementById("m"); const text = m.value.trim(); if (!text && !pending.length) return; m.value = "";
-  const images = pending; pending = []; att.innerHTML = "";
-  add("user", images.map((u) => `<img src="${u}" alt="photo">`).join("") + esc(text)); const wait = add("bot", "<span class='t'>thinking...</span>");
-  const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text || "(photo)", images }) });
-  const out = await r.json();
-  if (out.error) { wait.innerHTML = `<span style="color:#F87171">${esc(out.error)}</span>`; return; }
-  (out.decisions || []).forEach(decision);
-  const n = (out.decisions || []).length;
-  wait.innerHTML = esc(out.reply) + `<div class="t">${out.latency_ms} ms · ${n} decision${n === 1 ? "" : "s"}${out.served_by ? " · " + esc(out.served_by) : ""}</div>`;
-  document.body.dataset.turns = (+(document.body.dataset.turns || 0) + 1);
+document.getElementById('seg-ta')?.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyse(); }
 });
 </script>
 </body>

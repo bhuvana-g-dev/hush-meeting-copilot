@@ -1,296 +1,150 @@
 /**
- * Hush Meeting Copilot - Popup Script
- * Controls the extension popup UI and communicates with content script
+ * Meeting Copilot — Popup Script
  */
 
-// UI elements
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-const openDashboardBtn = document.getElementById('openDashboardBtn');
-const backendUrlInput = document.getElementById('backendUrl');
-const statusDot = document.getElementById('statusDot');
-const capturingStatus = document.getElementById('capturingStatus');
-const captionCount = document.getElementById('captionCount');
-const backendStatus = document.getElementById('backendStatus');
-const sessionId = document.getElementById('sessionId');
-const errorAlert = document.getElementById('errorAlert');
-const errorMessage = document.getElementById('errorMessage');
-const infoAlert = document.getElementById('infoAlert');
-const infoMessage = document.getElementById('infoMessage');
-const decisionPreview = document.getElementById('decisionPreview');
+"use strict";
 
-// State
-let currentState = {
-  isCapturing: false,
-  captionCount: 0,
-  sessionId: null,
-  error: null,
-  lastResponse: null
-};
+const goalInput = document.getElementById("goal-input");
+const btnSaveGoal = document.getElementById("btn-save-goal");
+const goalStatus = document.getElementById("goal-status");
+const feed = document.getElementById("feed");
+const stDot = document.getElementById("st-dot");
+const stText = document.getElementById("st-text");
+const backendInput = document.getElementById("backend-url");
+const btnSaveUrl = document.getElementById("btn-save-url");
 
-/**
- * Initialize popup
- */
-async function init() {
-  console.log('[Hush Popup] Initializing');
-  
-  // Load settings
-  chrome.storage.local.get(['backendUrl'], (result) => {
-    if (result.backendUrl) {
-      backendUrlInput.value = result.backendUrl;
+// Initialize state
+chrome.storage.local.get(["meeting_goal", "hush_backend_url"], (data) => {
+  if (data.meeting_goal) {
+    goalInput.value = data.meeting_goal;
+    goalStatus.textContent = "Aim Locked";
+  }
+  backendInput.value = data.hush_backend_url || "http://localhost:8501";
+});
+
+// Load recent history from background
+chrome.runtime.sendMessage({ type: "HUSH_GET_HISTORY" }, (res) => {
+  if (res && res.history && res.history.length > 0) {
+    feed.innerHTML = "";
+    for (const rec of res.history.slice(-10).reverse()) {
+      renderRecord(rec);
     }
+  }
+});
+
+// Goal save handler
+btnSaveGoal.addEventListener("click", () => {
+  const goal = goalInput.value.trim();
+  chrome.runtime.sendMessage({ type: "HUSH_SET_GOAL", goal }, () => {
+    goalStatus.textContent = goal ? "Aim Locked" : "No Aim";
   });
-  
-  // Get current state from background
-  chrome.runtime.sendMessage({ action: 'getState' }, (state) => {
-    if (state) {
-      updateUI(state);
-    }
+});
+
+goalInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    btnSaveGoal.click();
+  }
+});
+
+// Preset chips
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    goalInput.value = chip.dataset.goal;
+    btnSaveGoal.click();
   });
-  
-  // Check if we're on a Meet page
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && !tab.url?.includes('meet.google.com')) {
-    showInfo('Open a Google Meet call to start capturing captions');
-    startBtn.disabled = true;
-  }
-  
-  // Set up event listeners
-  startBtn.addEventListener('click', handleStart);
-  stopBtn.addEventListener('click', handleStop);
-  saveSettingsBtn.addEventListener('click', handleSaveSettings);
-  openDashboardBtn.addEventListener('click', handleOpenDashboard);
-  
-  // Listen for state updates from background
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.action === 'stateUpdate') {
-      updateUI(message.state);
-    }
+});
+
+// Save backend URL
+btnSaveUrl.addEventListener("click", () => {
+  const url = backendInput.value.trim() || "http://localhost:8501";
+  chrome.runtime.sendMessage({ type: "HUSH_SET_BACKEND", url }, () => {
+    btnSaveUrl.textContent = "Saved";
+    setTimeout(() => { btnSaveUrl.textContent = "Save URL"; }, 1500);
   });
-}
+});
 
-/**
- * Handle start capture button
- */
-async function handleStart() {
-  console.log('[Hush Popup] Starting capture');
-  
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  
-  if (!tab || !tab.url?.includes('meet.google.com')) {
-    showError('Please open a Google Meet call first');
-    return;
+// Message listener for real-time wingman updates
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "WINGMAN_NUDGE" && msg.record) {
+    renderRecord(msg.record, true);
   }
-  
-  // Send message to content script
-  chrome.tabs.sendMessage(tab.id, { action: 'startCapture' }, (response) => {
-    if (chrome.runtime.lastError) {
-      showError('Failed to start capture. Please refresh the Meet page.');
-      return;
+  if (msg.type === "WINGMAN_GOAL_UPDATED") {
+    goalInput.value = msg.goal || "";
+    goalStatus.textContent = msg.goal ? "Aim Locked" : "No Aim";
+  }
+  if (msg.type === "HUSH_STATUS_UPDATE") {
+    if (msg.status === "connected") {
+      stDot.className = "st-dot";
+      stText.textContent = "Connected to Google Meet captions";
+    } else if (msg.status === "waiting") {
+      stDot.className = "st-dot waiting";
+      stText.textContent = "Turn on captions (CC) in Google Meet";
     }
-    
-    if (response?.success) {
-      showInfo('Capture started! Enable captions in Google Meet if not already on.');
-      clearError();
-    }
-  });
-}
+  }
+  if (msg.type === "HUSH_ERROR") {
+    stDot.style.background = "#ef4444";
+    stText.textContent = msg.message;
+  }
+});
 
-/**
- * Handle stop capture button
- */
-async function handleStop() {
-  console.log('[Hush Popup] Stopping capture');
-  
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  
-  if (!tab) return;
-  
-  chrome.tabs.sendMessage(tab.id, { action: 'stopCapture' }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.warn('[Hush Popup] Content script not responding');
-      return;
-    }
-    
-    if (response?.success) {
-      showInfo('Capture stopped');
-      clearError();
-    }
-  });
-}
+function renderRecord(rec, prepend = false) {
+  const nudge = rec.nudge_type || (rec.wingman && rec.wingman.nudge_type) || "STAY_SILENT";
+  const speaker = rec.speaker || (rec.wingman && rec.wingman.speaker) || "Speaker";
+  const summary = rec.wake_up_summary || (rec.wingman && rec.wingman.wake_up_summary) || "";
+  const doubt = rec.suggested_doubt || (rec.wingman && rec.wingman.suggested_doubt) || "";
+  const reason = rec.reason || (rec.wingman && rec.wingman.reason) || "";
 
-/**
- * Handle save settings button
- */
-function handleSaveSettings() {
-  const url = backendUrlInput.value.trim();
-  
-  if (!url) {
-    showError('Backend URL cannot be empty');
-    return;
-  }
-  
-  // Validate URL format
-  try {
-    new URL(url);
-  } catch (e) {
-    showError('Invalid URL format');
-    return;
-  }
-  
-  // Save to storage
-  chrome.storage.local.set({ backendUrl: url }, () => {
-    showInfo('Settings saved');
-    
-    // Update content script
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (tab) {
-        chrome.tabs.sendMessage(tab.id, { 
-          action: 'updateBackendUrl', 
-          url 
-        });
-      }
-    });
-  });
-}
+  if (nudge === "STAY_SILENT" && !summary) return;
 
-/**
- * Handle open dashboard button
- */
-function handleOpenDashboard() {
-  const url = backendUrlInput.value.trim();
-  chrome.tabs.create({ url: url || 'http://localhost:8501' });
-}
+  const card = document.createElement("div");
 
-/**
- * Update UI based on state
- */
-function updateUI(state) {
-  currentState = state;
-  
-  // Update status dot
-  if (state.error) {
-    statusDot.className = 'status-dot error';
-  } else if (state.isCapturing) {
-    statusDot.className = 'status-dot active';
-  } else {
-    statusDot.className = 'status-dot';
-  }
-  
-  // Update buttons
-  startBtn.disabled = state.isCapturing;
-  stopBtn.disabled = !state.isCapturing;
-  
-  // Update status info
-  if (state.isCapturing) {
-    capturingStatus.textContent = 'Active';
-    capturingStatus.className = 'status-value active';
-  } else {
-    capturingStatus.textContent = 'Inactive';
-    capturingStatus.className = 'status-value inactive';
-  }
-  
-  captionCount.textContent = state.captionCount || 0;
-  
-  if (state.lastResponse) {
-    backendStatus.textContent = 'Connected';
-    backendStatus.className = 'status-value active';
-  } else if (state.isCapturing) {
-    backendStatus.textContent = 'Connecting...';
-    backendStatus.className = 'status-value';
-  } else {
-    backendStatus.textContent = 'Disconnected';
-    backendStatus.className = 'status-value inactive';
-  }
-  
-  sessionId.textContent = state.sessionId || '—';
-  
-  // Update error
-  if (state.error) {
-    showError(state.error);
-  }
-  
-  // Update decisions preview
-  if (state.lastResponse?.decisions && state.lastResponse.decisions.length > 0) {
-    renderDecisions(state.lastResponse.decisions);
-  }
-}
-
-/**
- * Render decisions in preview
- */
-function renderDecisions(decisions) {
-  // Keep only last 5 decisions
-  const recentDecisions = decisions.slice(-5);
-  
-  if (recentDecisions.length === 0) {
-    decisionPreview.innerHTML = '<div class="empty">No decisions yet</div>';
-    return;
-  }
-  
-  decisionPreview.innerHTML = recentDecisions.reverse().map(decision => {
-    const verdict = decision.verdict || 'proceed';
-    const tool = decision.tool || 'unknown';
-    const action = decision.action || '—';
-    const confidence = decision.action_confidence 
-      ? `${(decision.action_confidence * 100).toFixed(0)}%` 
-      : '—';
-    const sensitive = decision.contains_sensitive 
-      ? `${(decision.contains_sensitive * 100).toFixed(0)}%` 
-      : '—';
-    
-    return `
-      <div class="decision-item ${verdict}">
-        <div class="decision-header">
-          <span class="decision-tool">${tool}</span>
-          <span class="decision-verdict">${verdict}</span>
-        </div>
-        <div class="decision-details">
-          Action: ${action} (${confidence}) | Sensitive: ${sensitive}
-        </div>
+  if (nudge === "FOCUS_ALERT") {
+    card.className = "card focus-alert";
+    card.innerHTML = `
+      <div class="card-hdr" style="color:var(--accent);">⚡ CONTEXT ALERT (Wake Up)</div>
+      <div class="card-text">
+        <strong>${speaker}</strong> is discussing your topic:
+        <div style="margin-top:4px;">${summary}</div>
       </div>
+      ${reason ? `<div style="font-size:11px;color:var(--ink3);">${reason}</div>` : ""}
     `;
-  }).join('');
-}
+  } else if (nudge === "ASK_DOUBT") {
+    card.className = "card ask-doubt";
+    card.innerHTML = `
+      <div class="card-hdr" style="color:var(--green);">🎤 ASK YOUR QUESTION NOW</div>
+      <div class="card-text"><strong>${speaker}</strong> paused or opened the floor.</div>
+      <div class="quote-box">"${doubt}"</div>
+      <button class="btn-action green btn-copy-card">📋 Copy Question</button>
+    `;
+    const copyBtn = card.querySelector(".btn-copy-card");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(doubt);
+        copyBtn.textContent = "✓ Copied!";
+        setTimeout(() => { copyBtn.textContent = "📋 Copy Question"; }, 2000);
+      });
+    }
+  } else if (nudge === "GOAL_RESOLVED") {
+    card.className = "card goal-resolved";
+    card.innerHTML = `
+      <div class="card-hdr" style="color:var(--primary);">🎉 GOAL ADDRESSED</div>
+      <div class="card-text">${summary || "Topic resolved in meeting."}</div>
+    `;
+  } else {
+    card.className = "card";
+    card.innerHTML = `
+      <div class="card-hdr" style="color:var(--ink3);">👂 Routine Discussion</div>
+      <div class="card-text" style="color:var(--ink2);">${summary}</div>
+    `;
+  }
 
-/**
- * Show error message
- */
-function showError(message) {
-  errorMessage.textContent = message;
-  errorAlert.classList.add('show');
-  infoAlert.classList.remove('show');
-  
-  // Auto-clear error after 5 seconds
-  setTimeout(clearError, 5000);
-}
+  // Remove placeholder if present
+  const init = document.getElementById("initial-card");
+  if (init) init.remove();
 
-/**
- * Show info message
- */
-function showInfo(message) {
-  infoMessage.textContent = message;
-  infoAlert.classList.add('show');
-  errorAlert.classList.remove('show');
-  
-  // Auto-clear info after 3 seconds
-  setTimeout(() => {
-    infoAlert.classList.remove('show');
-  }, 3000);
-}
-
-/**
- * Clear error message
- */
-function clearError() {
-  errorAlert.classList.remove('show');
-  chrome.runtime.sendMessage({ action: 'clearError' });
-}
-
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
+  if (prepend && feed.firstChild) {
+    feed.insertBefore(card, feed.firstChild);
+  } else {
+    feed.appendChild(card);
+  }
 }
