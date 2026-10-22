@@ -10,6 +10,23 @@ An agent on AWS that hands one decision to **Strands Decider 2B** and the conver
 - Article: (add the AWS Builder Center link after publishing)
 - Deployed: run `.\kit.cmd deploy` to deploy to Amazon Bedrock AgentCore Runtime
 
+## 🎙️ NEW: Google Meet Integration
+
+**Hush now connects to live Google Meet calls via Chrome Extension!**
+
+- ✅ Capture real-time captions from Google Meet
+- ✅ AI analysis of live conversations as they happen
+- ✅ Privacy-focused: only reads visible captions
+- ✅ No changes to existing Hush functionality
+
+**Quick Start:**
+1. Load the extension from `chrome-extension/` folder
+2. Join a Google Meet call and enable captions
+3. Click Start Capture in the extension
+4. View AI decisions in the Hush dashboard
+
+**See [GOOGLE_MEET_INTEGRATION.md](GOOGLE_MEET_INTEGRATION.md) for complete setup and testing instructions.**
+
 ## The project
 
 - **Pitch:** A meeting copilot that decides -- before acting -- whether to interject with a
@@ -18,6 +35,7 @@ An agent on AWS that hands one decision to **Strands Decider 2B** and the conver
   disclosures, flagging missed action items, and recording decisions without interrupting the
   flow unless it genuinely matters.
 - **Features:**
+  - **NEW: Live Google Meet caption capture** via Chrome Extension
   - analyse transcript segments and extract action items in real time
   - choose INTERJECT, TAKE_NOTE, or STAY_SILENT using Strands Decider 2B
   - interject with a concise, actionable suggestion when the meeting genuinely needs it
@@ -40,6 +58,11 @@ at a clear seam in the agent's path.
 
 Every Amazon Bedrock model id is set in `.env` (`BEDROCK_MODEL_ID`, and
 `BEDROCK_SMALL/MEDIUM/LARGE_MODEL_ID` for routing), Amazon Nova by default.
+
+**Chrome Extension:** The Google Meet integration uses a Manifest V3 extension that captures
+visible captions from the meeting DOM and sends them to the existing Hush backend via the
+`/api/chat` endpoint. No core agent logic was modified—the extension simply provides a new
+input source for transcripts.
 
 ## Reusable decision pattern: meeting copilot action guard
 
@@ -109,6 +132,69 @@ test; charts in `submission/bench/`).
 
 Requirements: Python 3.10+, AWS credentials with Amazon Bedrock access (us-east-1, Amazon Nova
 Pro), and for deploying: Node 20+ with the AgentCore CLI (`.\kit.cmd agentcore-cli`).
+
+### Google Meet Integration Setup
+
+See [GOOGLE_MEET_INTEGRATION.md](GOOGLE_MEET_INTEGRATION.md) for detailed instructions.
+
+**Quick setup:**
+
+1. **Generate extension icons:**
+   ```bash
+   cd chrome-extension
+   python generate_icons.py
+   ```
+
+2. **Load extension in Chrome:**
+   - Open `chrome://extensions`
+   - Enable Developer mode
+   - Click "Load unpacked"
+   - Select `chrome-extension/` folder
+
+3. **Use in Google Meet:**
+   - Join a meeting and enable captions (CC button)
+   - Click Hush extension icon
+   - Click "Start Capture"
+   - Open Hush dashboard to see live AI decisions
+
+## Testing
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Test extension integration
+python -m pytest tests/test_extension_integration.py -v
+
+# Run existing tests (verify no regressions)
+python -m pytest tests/test_agent_contract.py tests/test_tools.py -v
+```
+
+## Project Structure
+
+```
+hush-meeting-copilot/
+├── agent/                      # Core Hush agent (unchanged)
+│   ├── agent.py               # Main agent orchestrator
+│   ├── decision.py            # Strands Decider 2B guardrails
+│   ├── tools.py               # Agent tools (interject, take_note)
+│   └── eval_cases.jsonl       # Evaluation dataset
+├── chrome-extension/          # NEW: Google Meet integration
+│   ├── manifest.json          # Extension config
+│   ├── content.js             # Caption capture
+│   ├── background.js          # API communication
+│   ├── popup.html/js          # Extension UI
+│   └── README.md              # Extension docs
+├── demo/
+│   ├── server.py              # FastAPI backend
+│   └── static/
+│       └── index.html         # Web UI (updated with Meet status)
+├── tests/
+│   ├── test_extension_integration.py  # NEW: Extension tests
+│   └── ...                    # Existing tests (all preserved)
+├── GOOGLE_MEET_INTEGRATION.md # NEW: Integration guide
+└── README.md                  # This file
+```
 
 ## Credits
 
