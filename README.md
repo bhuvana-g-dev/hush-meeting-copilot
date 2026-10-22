@@ -26,11 +26,45 @@ An agent on AWS that hands one decision to **Strands Decider 2B** and the conver
   - sensitive content detected with STAY_SILENT triggers a human confirmation step
   - live decision panel in the demo UI shows every probability and verdict
   - deployed on Amazon Bedrock AgentCore Runtime
+  - **NEW:** Chrome Extension for capturing Google Meet captions in real time
 - **The decision:** before every action (interject or take_note), Strands Decider 2B reads the
   transcript and answers: which of INTERJECT / TAKE_NOTE / STAY_SILENT is warranted, and does
   the transcript contain sensitive material? (`#guardrails`)
 - **Amazon Bedrock:** the conversation, suggestions, note text, and transcript analysis
   (Amazon Nova Pro by default; set `BEDROCK_MODEL_ID` in `.env`).
+
+## Google Meet Integration 🎥
+
+**New Chrome Extension** for live Google Meet caption capture! The extension automatically captures visible captions from Google Meet and sends them to the Hush backend for real-time AI decision-making.
+
+### Quick Start
+
+1. **Install the extension:**
+   ```bash
+   # Generate placeholder icons first
+   cd chrome-extension/icons
+   # Follow instructions in icons/README.md to generate icon files
+   ```
+
+2. **Load in Chrome:**
+   - Open `chrome://extensions/`
+   - Enable "Developer mode"
+   - Click "Load unpacked"
+   - Select the `chrome-extension/` directory
+
+3. **Start Hush backend:**
+   ```bash
+   ./kit demo  # Starts at http://localhost:8501
+   ```
+
+4. **Use in Google Meet:**
+   - Join a Google Meet call
+   - Enable captions in Meet (press `C`)
+   - Click Hush extension icon
+   - Click "▶ Start Capture"
+   - Watch real-time decisions in the popup and dashboard!
+
+📖 **Full documentation:** See [`chrome-extension/README.md`](chrome-extension/README.md) for detailed setup, usage, and troubleshooting.
 
 ## How it is built
 
@@ -40,6 +74,17 @@ at a clear seam in the agent's path.
 
 Every Amazon Bedrock model id is set in `.env` (`BEDROCK_MODEL_ID`, and
 `BEDROCK_SMALL/MEDIUM/LARGE_MODEL_ID` for routing), Amazon Nova by default.
+
+### Chrome Extension Architecture
+
+The Chrome Extension (`chrome-extension/`) integrates seamlessly with the existing backend:
+
+- **Content Script** (`content.js`) - Captures captions from Google Meet DOM
+- **Background Worker** (`background.js`) - Manages extension state
+- **Popup UI** (`popup.html`, `popup.js`) - User controls and decision preview
+- **Backend Integration** - Reuses existing `/api/chat` endpoint
+
+No changes to core agent logic required - the extension acts as an alternative input source alongside the web UI.
 
 ## Reusable decision pattern: meeting copilot action guard
 
@@ -107,8 +152,16 @@ test; charts in `submission/bench/`).
 ./kit deploy
 ```
 
+**Google Meet Extension:**
+```bash
+# Load chrome-extension/ folder in Chrome (see chrome-extension/README.md)
+# Join a Meet call, enable captions, and click "Start Capture"
+```
+
 Requirements: Python 3.10+, AWS credentials with Amazon Bedrock access (us-east-1, Amazon Nova
 Pro), and for deploying: Node 20+ with the AgentCore CLI (`.\kit.cmd agentcore-cli`).
+
+For Chrome Extension: Chrome 88+ with Developer mode enabled.
 
 ## Credits
 
