@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hush AI Meeting Copilot</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🤫 Hush AI</h1>
+      <p class="subtitle">Meeting Copilot</p>
+    </header>
+
+    <section class="status-section">
+      <div class="status-item">
+        <span class="label">Backend:</span>
+        <span id="backendStatus" class="status-badge status-unknown">Checking...</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Meeting:</span>
+        <span id="meetingStatus" class="status-badge status-unknown">Unknown</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Captions:</span>
+        <span id="captionStatus" class="status-badge status-unknown">Unknown</span>
+      </div>
+    </section>
+
+    <section class="controls-section">
+      <button id="startBtn" class="btn btn-primary" disabled>
+        <span class="btn-icon">▶</span>
+        Start Capture
+      </button>
+      <button id="stopBtn" class="btn btn-secondary" disabled>
+        <span class="btn-icon">⬛</span>
+        Stop Capture
+      </button>
+    </section>
+
+    <section class="info-section">
+      <div class="info-card">
+        <h3>📋 How to Use</h3>
+        <ol>
+          <li>Ensure Hush backend is running on <code>localhost:8501</code></li>
+          <li>Join a Google Meet call</li>
+          <li>Enable captions in Google Meet (CC button)</li>
+          <li>Click <strong>Start Capture</strong> to begin analysis</li>
+          <li>Open Hush website to see AI decisions in real-time</li>
+        </ol>
+      </div>
+
+      <div class="info-card privacy-notice">
+        <h3>🔒 Privacy Notice</h3>
+        <p>This extension captures visible captions from your Google Meet session and sends them to your local Hush backend for AI analysis.</p>
+        <ul>
+          <li>Only visible captions are captured</li>
+          <li>Capture starts only when you click Start</li>
+          <li>No audio or video is accessed</li>
+          <li>Data is sent to your local backend only</li>
+          <li>No external services are contacted</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="error-section" id="errorSection" style="display: none;">
+      <div class="error-card">
+        <h3>⚠️ Error</h3>
+        <p id="errorMessage"></p>
+      </div>
+    </section>
+
+    <footer>
+      <p class="footer-text">Hush AI Meeting Copilot v1.0</p>
+      <p class="footer-link">
+        <a href="http://localhost:8501" target="_blank">Open Hush Dashboard →</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
