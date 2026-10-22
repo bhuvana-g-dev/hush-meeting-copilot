@@ -35,6 +35,11 @@ const CAPTION_CONTAINER_SELECTORS = [
   '[jsname="tgaKEf"]',
   '[aria-label*="caption" i]',
   '[role="region"][aria-label*="caption" i]',
+  '[jscontroller="D1tHje"]',
+  'div[aria-live="polite"]',
+  'div[aria-live="assertive"]',
+  '.nMxvdc',
+  '.a4cQT',
 ];
 
 const SPEAKER_SELECTORS = [
@@ -115,14 +120,16 @@ function injectMeetingHUD() {
   root.innerHTML = `
     <style>
       #meet-copilot-hud-root {
-        position: fixed;
-        top: 24px;
-        right: 24px;
-        z-index: 9999999;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-        font-size: 13px;
-        color: #f1f5f9;
-        pointer-events: none;
+        position: fixed !important;
+        top: 24px !important;
+        right: 24px !important;
+        z-index: 2147483647 !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif !important;
+        font-size: 13px !important;
+        color: #f1f5f9 !important;
+        display: block !important;
+        visibility: visible !important;
+        pointer-events: none !important;
       }
       .mc-hud {
         pointer-events: auto;
@@ -858,6 +865,11 @@ function sendStatus(status) {
 function init() {
   injectMeetingHUD();
   startObserving();
+  setInterval(() => {
+    if (!document.getElementById("meet-copilot-hud-root")) {
+      injectMeetingHUD();
+    }
+  }, 2000);
   chrome.runtime.sendMessage({ type: "HUSH_CONTENT_READY" }).catch(() => {});
 }
 
