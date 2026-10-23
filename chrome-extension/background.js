@@ -123,40 +123,34 @@ async function handleSegment(segment, ts, explicitGoal) {
     });
   }
 
-  // Try wingman endpoint first with fallback and wake-up notification
+  // Resilient multi-target dispatch (Render Cloud -> Localhost fallback)
   let result = null;
+  const targetUrls = [DEFAULT_BACKEND, FALLBACK_BACKEND];
+  let lastErr = null;
 
-  async function postWingman(url) {
-    const res = await fetch(`${url}/api/wingman`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
-    });
-    if (res.ok) return await res.json();
-    throw new Error(`HTTP ${res.status}`);
+  for (const url of targetUrls) {
+    try {
+      const res = await fetch(`${url}/api/wingman`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
+      });
+      if (res.ok) {
+        result = await res.json();
+        break;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
   }
 
-  try {
-    result = await postWingman(backendUrl);
-  } catch (err) {
-    // If primary failed, try local fallback
-    if (backendUrl === DEFAULT_BACKEND) {
-      try {
-        result = await postWingman(FALLBACK_BACKEND);
-      } catch (localErr) {
-        // Both failed — notify that Render free tier might be waking up
-        broadcastToMeetTabs({
-          type: "WINGMAN_STATUS",
-          message: "Waking up cloud AI (takes ~30s on first load)..."
-        });
-        return;
-      }
-    } else {
-      const errorMsg = `Cannot reach backend at ${backendUrl} (${err.message})`;
-      broadcastToMeetTabs({ type: "WINGMAN_ERROR", message: errorMsg });
-      broadcastToPopup({ type: "HUSH_ERROR", message: errorMsg });
-      return;
-    }
+  if (!result) {
+    const errorMsg = lastErr ? lastErr.message : "Server waking up";
+    broadcastToMeetTabs({
+      type: "WINGMAN_STATUS",
+      message: `Connecting to AI server... (${errorMsg})`
+    });
+    return;
   }
 
   if (!result) return;

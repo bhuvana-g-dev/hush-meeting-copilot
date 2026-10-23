@@ -34,6 +34,15 @@ from decider_kit.config import load_dotenv
 load_dotenv()
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Hush — meeting companion")
+
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 _agent: Any = None
 
 
