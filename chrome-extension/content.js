@@ -1383,118 +1383,163 @@ function renderActiveCard(record) {
   });
 }
 
-// ── Google Meet Captions Observation ──────────────────────────────────
+// ── Ultra-Resilient Google Meet Captions Capture Engine ──────────────
+let liveUtterance = { speaker: "", text: "", timer: null };
+let activeScanInterval = null;
+const UTTERANCE_FINALIZE_DELAY_MS = 1000; // Finalize sentence 1.0s after speaker pauses
+
 function startObserving() {
   if (observer) return;
 
-  const container = findCaptionContainer();
   const ccStatusEl = document.getElementById("mc-cc-status");
-
-  if (!container) {
-    if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#f59e0b;">Turn on CC (Captions)</span>';
-    const bodyObs = new MutationObserver(() => {
-      if (findCaptionContainer()) {
-        bodyObs.disconnect();
-        startObserving();
-      }
-    });
-    bodyObs.observe(document.body, { childList: true, subtree: true });
-    sendStatus("waiting");
-    return;
-  }
-
   if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
   sendStatus("connected");
 
+  // 1. Observe entire document body for any caption additions/updates
   observer = new MutationObserver((mutations) => {
     if (!capturing) return;
-    mutations.forEach(processMutation);
+    for (const m of mutations) {
+      // Ignore mutations originating from our own HUD
+      if (m.target && m.target.closest && m.target.closest("#meet-copilot-hud-root")) continue;
+      scanForCaptions();
+      break;
+    }
   });
 
-  observer.observe(container, {
+  observer.observe(document.body, {
     childList: true,
     subtree: true,
     characterData: true,
-    characterDataOldValue: true,
   });
+
+  // 2. High-reliability polling fallback every 500ms
+  if (!activeScanInterval) {
+    activeScanInterval = setInterval(() => {
+      if (capturing) scanForCaptions();
+    }, 500);
+  }
 }
 
 function stopObserving() {
   if (observer) { observer.disconnect(); observer = null; }
+  if (activeScanInterval) { clearInterval(activeScanInterval); activeScanInterval = null; }
   flushBuffer(true);
   sendStatus("idle");
 }
 
-function processMutation(mutation) {
-  const node = mutation.target.nodeType === Node.TEXT_NODE
-    ? mutation.target.parentElement
-    : mutation.target;
-  if (!node) return;
+function scanForCaptions() {
+  // Target known Google Meet caption rows and wrappers
+  const blocks = document.querySelectorAll(
+    '.nMcdL, [jsname="YSg9Nc"], .a4cQT, [jsname="tgaKEf"], [data-caption-container], .ygicle, .VbkSUe'
+  );
 
-  const block = findUtteranceBlock(node);
-  if (!block) return;
+  let detectedCaptions = [];
 
-  extractAndBuffer(block);
-}
+  blocks.forEach(block => {
+    if (block.closest("#meet-copilot-hud-root")) return;
 
-function findUtteranceBlock(el) {
-  let cur = el;
-  for (let i = 0; i < 8 && cur; i++) {
-    if (cur.hasAttribute && (
-      cur.getAttribute('jsname') === 'YSg9Nc' ||
-      cur.getAttribute('data-utterance') !== null ||
-      (cur.children.length >= 1 && cur.textContent.trim().length > 0)
-    )) {
-      return cur;
+    let speaker = "";
+    let text = "";
+
+    // A. Check for speaker name element
+    const speakerEl = block.querySelector('.NWpY1d, [jsname="du16Kb"], [data-speaker-name]');
+    if (speakerEl && speakerEl.textContent.trim()) {
+      speaker = speakerEl.textContent.trim();
     }
-    cur = cur.parentElement;
+
+    // B. Check for text element
+    const textEl = block.querySelector('.ygicle, .VbkSUe') || (block.matches('.ygicle, .VbkSUe') ? block : null);
+    if (textEl && textEl.textContent.trim()) {
+      text = textEl.textContent.trim();
+    } else {
+      // Generic block fallback
+      const fullText = block.textContent.trim();
+      if (fullText) {
+        text = fullText;
+      }
+    }
+
+    // Clean speaker prefix from text if repeated
+    if (speaker && text.startsWith(speaker)) {
+      text = text.slice(speaker.length).trim();
+    }
+
+    if (text && text.length > 1) {
+      detectedCaptions.push({ speaker: speaker || "Speaker", text });
+    }
+  });
+
+  // If specific blocks weren't found, try scanning any visible subtitle in the lower viewport
+  if (detectedCaptions.length === 0) {
+    const allDivs = document.querySelectorAll('div[jscontroller], div[jsname], div[role="region"]');
+    for (const d of allDivs) {
+      if (d.closest("#meet-copilot-hud-root")) continue;
+      const rect = d.getBoundingClientRect();
+      // Captions are rendered in bottom 45% of the viewport and are relatively wide
+      if (rect.top > window.innerHeight * 0.55 && rect.width > 200 && rect.height > 20) {
+        const txt = d.textContent.trim();
+        // Ignore Google Meet control buttons or prompts
+        if (txt && !txt.includes("Your meeting's ready") && !txt.includes("meet.google.com") && !txt.includes("Add others") && txt.length > 5) {
+          detectedCaptions.push({ speaker: "Speaker", text: txt });
+          break;
+        }
+      }
+    }
   }
-  return el;
+
+  const ccStatusEl = document.getElementById("mc-cc-status");
+  if (ccStatusEl) {
+    if (detectedCaptions.length > 0) {
+      ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected (Speech Active)</span>';
+    } else {
+      ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
+    }
+  }
+
+  // Process the most recent active caption
+  if (detectedCaptions.length > 0) {
+    const latest = detectedCaptions[detectedCaptions.length - 1];
+    processLiveText(latest.speaker, latest.text);
+  }
 }
 
-function extractAndBuffer(block) {
-  const speaker = extractSpeaker(block);
-  const text    = extractText(block, speaker);
-  if (!text) return;
+function processLiveText(speaker, text) {
+  const clean = text.trim();
+  if (!clean || clean === lastSentText) return;
 
-  const prev = lastText.get(block) || "";
-  const prevSpeaker = lastSpeaker.get(block) || "";
-
-  lastText.set(block, text);
-  lastSpeaker.set(block, speaker);
-
-  if (prev && prev !== text && text.length - prev.length > 25) {
-    commitLine(prevSpeaker || speaker, prev);
+  // If speaker changed, immediately commit whatever the previous speaker said
+  if (liveUtterance.speaker && liveUtterance.speaker !== speaker && liveUtterance.text) {
+    finalizeLiveUtterance();
   }
+
+  liveUtterance.speaker = speaker;
+  liveUtterance.text = clean;
+
+  // Restart debounce timer to commit once the speaker pauses
+  clearTimeout(liveUtterance.timer);
+  liveUtterance.timer = setTimeout(() => {
+    finalizeLiveUtterance();
+  }, UTTERANCE_FINALIZE_DELAY_MS);
 }
 
-function extractSpeaker(block) {
-  for (const sel of SPEAKER_SELECTORS) {
-    const el = block.querySelector(sel);
-    if (el && el.textContent.trim()) return el.textContent.trim();
-  }
-  const firstSpan = block.querySelector("span");
-  if (firstSpan) {
-    const t = firstSpan.textContent.trim();
-    if (t.length < 40 && !/[.,!?]/.test(t)) return t;
-  }
-  return "";
-}
+function finalizeLiveUtterance() {
+  clearTimeout(liveUtterance.timer);
+  const text = (liveUtterance.text || "").trim();
+  const speaker = liveUtterance.speaker || "Speaker";
 
-function extractText(block, speaker) {
-  let raw = block.textContent.trim();
-  if (speaker && raw.startsWith(speaker)) {
-    raw = raw.slice(speaker.length).trim();
-  }
-  return raw;
+  if (!text || text === lastSentText || text.length < 3) return;
+
+  lastSentText = text;
+  liveUtterance = { speaker: "", text: "", timer: null };
+
+  commitLine(speaker, text);
 }
 
 function commitLine(speaker, text) {
   const clean = text.trim();
-  if (!clean || clean === lastSentText) return;
-  lastSentText = clean;
+  if (!clean) return;
 
-  const line = speaker ? `[${speaker}]: ${clean}` : clean;
+  const line = speaker && speaker !== "Speaker" ? `[${speaker}]: ${clean}` : clean;
   lineBuffer.push(line);
 
   // Add to in-memory live transcript
@@ -1504,16 +1549,13 @@ function commitLine(speaker, text) {
   });
   renderTranscriptList();
 
-  if (lineBuffer.length >= MAX_BUFFER_LINES) {
-    flushBuffer(false);
-  } else {
-    scheduleFlush();
-  }
+  // Prompt immediate flush so the AI evaluates without lag
+  scheduleFlush();
 }
 
 function scheduleFlush() {
   clearTimeout(flushTimer);
-  flushTimer = setTimeout(() => flushBuffer(false), FLUSH_DELAY_MS);
+  flushTimer = setTimeout(() => flushBuffer(false), 500);
 }
 
 function flushBuffer(force) {
@@ -1528,6 +1570,7 @@ function flushBuffer(force) {
     goal: currentGoal,
     ts: Date.now(),
   });
+}
 }
 
 // ── Messages from Background / Popup ──────────────────────────────────
