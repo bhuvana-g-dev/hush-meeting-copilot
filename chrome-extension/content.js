@@ -1428,70 +1428,71 @@ function stopObserving() {
 }
 
 function scanForCaptions() {
-  // Target known Google Meet caption rows and wrappers
-  const blocks = document.querySelectorAll(
-    '.nMcdL, [jsname="YSg9Nc"], .a4cQT, [jsname="tgaKEf"], [data-caption-container], .ygicle, .VbkSUe'
+  if (!capturing) return;
+
+  // Search all possible caption & aria-live regions
+  const regions = document.querySelectorAll(
+    '[aria-live="polite"], [jsname="YSg9Nc"], .nMcdL, .a4cQT, [jsname="tgaKEf"], .ygicle, .VbkSUe, div[data-caption-container]'
   );
 
-  let detectedCaptions = [];
+  let bestCaption = null;
 
-  blocks.forEach(block => {
-    if (block.closest("#meet-copilot-hud-root")) return;
+  regions.forEach(region => {
+    if (region.closest("#meet-copilot-hud-root")) return;
 
-    let speaker = "";
-    let text = "";
+    const raw = (region.innerText || region.textContent || "").trim();
+    if (!raw || raw.length < 5) return;
 
-    // A. Check for speaker name element
-    const speakerEl = block.querySelector('.NWpY1d, [jsname="du16Kb"], [data-speaker-name]');
-    if (speakerEl && speakerEl.textContent.trim()) {
-      speaker = speakerEl.textContent.trim();
+    // Filter out Google Meet system prompts & banners
+    if (
+      raw.includes("Your meeting's ready") ||
+      raw.includes("meet.google.com") ||
+      raw.includes("Add others") ||
+      raw.includes("joined as") ||
+      raw.includes("Joined as") ||
+      raw.includes("Turn on") ||
+      raw.includes("Raise hand") ||
+      raw.includes("Chat with everyone")
+    ) {
+      return;
     }
 
-    // B. Check for text element
-    const textEl = block.querySelector('.ygicle, .VbkSUe') || (block.matches('.ygicle, .VbkSUe') ? block : null);
-    if (textEl && textEl.textContent.trim()) {
-      text = textEl.textContent.trim();
+    // Extract speaker and text body
+    let speaker = "You";
+    let body = raw;
+
+    // Pattern 1: Multi-line where first line is speaker name (e.g. "You\nHello everyone...")
+    const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines[0].length < 35 && !/[.?!]/.test(lines[0])) {
+      speaker = lines[0];
+      body = lines.slice(1).join(" ");
     } else {
-      // Generic block fallback
-      const fullText = block.textContent.trim();
-      if (fullText) {
-        text = fullText;
+      // Pattern 2: "Speaker: Text"
+      const colonMatch = raw.match(/^([A-Za-z0-9 ]{1,30}):\s*(.+)/s);
+      if (colonMatch) {
+        speaker = colonMatch[1];
+        body = colonMatch[2];
       }
     }
 
-    // Clean speaker prefix from text if repeated
-    if (speaker && text.startsWith(speaker)) {
-      text = text.slice(speaker.length).trim();
+    // Clean up repeated speaker prefix
+    if (speaker && body.startsWith(speaker)) {
+      body = body.slice(speaker.length).trim();
     }
 
-    if (text && text.length > 1) {
-      detectedCaptions.push({ speaker: speaker || "Speaker", text });
+    if (body && body.length > 3) {
+      // Prefer the longer/more complete utterance
+      if (!bestCaption || body.length >= bestCaption.text.length) {
+        bestCaption = { speaker, text: body };
+      }
     }
   });
 
-  // If specific blocks weren't found, try scanning any visible subtitle in the lower viewport
-  if (detectedCaptions.length === 0) {
-    const allDivs = document.querySelectorAll('div[jscontroller], div[jsname], div[role="region"]');
-    for (const d of allDivs) {
-      if (d.closest("#meet-copilot-hud-root")) continue;
-      const rect = d.getBoundingClientRect();
-      // Captions are rendered in bottom 45% of the viewport and are relatively wide
-      if (rect.top > window.innerHeight * 0.55 && rect.width > 200 && rect.height > 20) {
-        const txt = d.textContent.trim();
-        // Ignore Google Meet control buttons or prompts
-        if (txt && !txt.includes("Your meeting's ready") && !txt.includes("meet.google.com") && !txt.includes("Add others") && txt.length > 5) {
-          detectedCaptions.push({ speaker: "Speaker", text: txt });
-          break;
-        }
-      }
-    }
-  }
-
   const ccStatusEl = document.getElementById("mc-cc-status");
-  if (detectedCaptions.length > 0) {
+
+  if (bestCaption) {
     if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected (Speech Active)</span>';
-    const latest = detectedCaptions[detectedCaptions.length - 1];
-    processLiveText(latest.speaker, latest.text);
+    processLiveText(bestCaption.speaker, bestCaption.text);
   } else {
     if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
     // If subtitle was cleared from screen and we have uncommitted utterance, finalize immediately!
