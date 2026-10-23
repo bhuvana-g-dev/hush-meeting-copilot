@@ -13,13 +13,15 @@ const stText = document.getElementById("st-text");
 const backendInput = document.getElementById("backend-url");
 const btnSaveUrl = document.getElementById("btn-save-url");
 
+const DEFAULT_URL = "https://hush-meeting-copilot.onrender.com";
+
 // Initialize state
 chrome.storage.local.get(["meeting_goal", "hush_backend_url"], (data) => {
   if (data.meeting_goal) {
     goalInput.value = data.meeting_goal;
     goalStatus.textContent = "Aim Locked";
   }
-  backendInput.value = data.hush_backend_url || "http://localhost:8501";
+  backendInput.value = data.hush_backend_url || DEFAULT_URL;
 });
 
 // Load recent history from background
@@ -56,7 +58,7 @@ document.querySelectorAll(".chip").forEach((chip) => {
 
 // Save backend URL
 btnSaveUrl.addEventListener("click", () => {
-  const url = backendInput.value.trim() || "http://localhost:8501";
+  const url = backendInput.value.trim() || DEFAULT_URL;
   chrome.runtime.sendMessage({ type: "HUSH_SET_BACKEND", url }, () => {
     btnSaveUrl.textContent = "Saved";
     setTimeout(() => { btnSaveUrl.textContent = "Save URL"; }, 1500);

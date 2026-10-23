@@ -4,27 +4,15 @@
  * Responsibilities
  * ----------------
  * 1. Receive HUSH_SEGMENT messages from the content script.
- * 2. POST them to the Hush backend (/api/analyse).
- * 3. Forward the response (decisions, notes, interjections) back to the
- *    popup (if open) so it can display them.
- * 4. Maintain a ring buffer of the last 50 decisions so the popup can
- *    display them even if it was closed during capture.
- *
- * Security
- * --------
- * - The backend URL is stored in chrome.storage.local, never hard-coded.
- * - No API keys are stored in the extension.  The Hush backend itself
- *   handles any authentication required.
- * - CORS: the backend must allow requests from the extension origin.
- *   The /api/analyse endpoint in server.py already returns permissive
- *   CORS headers for local use (FastAPI defaults).  If you add auth, add
- *   a HUSH_TOKEN storage key and include it as a Bearer token here.
+ * 2. POST them to the Hush backend (/api/analyse or /api/wingman).
+ * 3. Forward the response back to the in-meeting HUD and popup.
+ * 4. Maintain a ring buffer of the last 50 decisions for popup display.
  */
 
 "use strict";
 
-const DEFAULT_BACKEND = "http://localhost:8501";
-const FALLBACK_BACKEND = "http://localhost:8503";
+const DEFAULT_BACKEND = "https://hush-meeting-copilot.onrender.com";
+const FALLBACK_BACKEND = "http://localhost:8501";
 const SESSION_ID = "gmeet-" + Date.now();
 const MAX_HISTORY = 50;
 
@@ -117,8 +105,8 @@ async function handleSegment(segment, ts, explicitGoal) {
       body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
     });
 
-    // If 404 on port 8501, try fallback 8503
-    if (!res.ok && res.status === 404 && backendUrl === DEFAULT_BACKEND) {
+    // If failed on primary, try fallback
+    if (!res.ok && backendUrl === DEFAULT_BACKEND) {
       const fallbackRes = await fetch(`${FALLBACK_BACKEND}/api/wingman`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -127,7 +115,6 @@ async function handleSegment(segment, ts, explicitGoal) {
       if (fallbackRes && fallbackRes.ok) {
         res = fallbackRes;
         usedUrl = FALLBACK_BACKEND;
-        chrome.storage.local.set({ hush_backend_url: FALLBACK_BACKEND });
       }
     }
 
@@ -154,7 +141,7 @@ async function handleSegment(segment, ts, explicitGoal) {
       }
     }
   } catch (err) {
-    const errorMsg = `Cannot reach Wingman backend at ${backendUrl} — is kit demo running? (${err.message})`;
+    const errorMsg = `Cannot reach Wingman backend at ${backendUrl} (${err.message})`;
     broadcastToMeetTabs({ type: "WINGMAN_ERROR", message: errorMsg });
     broadcastToPopup({ type: "HUSH_ERROR", message: errorMsg });
     return;
