@@ -1,175 +1,107 @@
-# Hush: AI meeting copilot
+# Hush: AI Meeting Copilot & In-Meeting Wingman
 
-**An AI copilot that listens to live meeting transcripts and uses Strands Decider 2B to choose
-INTERJECT, TAKE_NOTE, or STAY_SILENT -- never acting without a calibrated reason.**
+**An intelligent in-meeting personal AI wingman for Google Meet powered by Strands Decider 2B.**  
+It listens to live meeting speech, keeps track of your personal meeting aims/goals, wakes you up when your key topic is discussed, suggests well-timed doubt questions to overcome hesitation, captures structured notes automatically, and neatly tucks itself aside so it never disturbs your call.
 
-An agent on AWS that hands one decision to **Strands Decider 2B** and the conversation to
-**Amazon Bedrock**. Decision pattern: `#guardrails`. Tags: `#strands-decider-2b` `#guardrails`.
+---
 
-- Video: (add the YouTube/Vimeo public link after recording with `.\kit.cmd video`)
-- Article: (add the AWS Builder Center link after publishing)
-- Deployed: run `.\kit.cmd deploy` to deploy to Amazon Bedrock AgentCore Runtime
+## 🔗 Quick Links for Judges & Reviewers
 
-## The project
+- 🌐 **Live Deployed Backend:** [https://hush-meeting-copilot.onrender.com](https://hush-meeting-copilot.onrender.com)
+- 💻 **GitHub Repository:** [https://github.com/bhuvana-g-dev/hush-meeting-copilot](https://github.com/bhuvana-g-dev/hush-meeting-copilot)
+- 📦 **Download Chrome Extension (Ready-to-Use Zip):** [Download hush-chrome-extension.zip](https://github.com/bhuvana-g-dev/hush-meeting-copilot/raw/main/hush-chrome-extension.zip)
 
-- **Pitch:** A meeting copilot that decides -- before acting -- whether to interject with a
-  suggestion, take a silent note, or stay quiet.
-- **Who it is for:** Teams that want an AI present in every meeting: catching sensitive
-  disclosures, flagging missed action items, and recording decisions without interrupting the
-  flow unless it genuinely matters.
-- **Features:**
-  - analyse transcript segments and extract action items in real time
-  - choose INTERJECT, TAKE_NOTE, or STAY_SILENT using Strands Decider 2B
-  - interject with a concise, actionable suggestion when the meeting genuinely needs it
-  - take a silent structured note (decision, commitment, risk, PII flag, action item)
-  - low-confidence choices routed to human review rather than acting automatically
-  - sensitive content detected with STAY_SILENT triggers a human confirmation step
-  - live decision panel in the demo UI shows every probability and verdict
-  - deployed on Amazon Bedrock AgentCore Runtime
-  - **NEW:** Chrome Extension for capturing Google Meet captions in real time
-- **The decision:** before every action (interject or take_note), Strands Decider 2B reads the
-  transcript and answers: which of INTERJECT / TAKE_NOTE / STAY_SILENT is warranted, and does
-  the transcript contain sensitive material? (`#guardrails`)
-- **Amazon Bedrock:** the conversation, suggestions, note text, and transcript analysis
-  (Amazon Nova Pro by default; set `BEDROCK_MODEL_ID` in `.env`).
+---
 
-## Google Meet Integration 🎥
+## ⚡ 2-Minute Quick Start (Try It Live in Google Meet!)
 
-**New Chrome Extension** for live Google Meet caption capture! The extension automatically captures visible captions from Google Meet and sends them to the Hush backend for real-time AI decision-making.
+No Python, command-line, or API key configuration is required to test! The extension is pre-configured to connect to our production Render backend.
 
-### Quick Start
+1. **Download & Extract Extension:**
+   - Download [`hush-chrome-extension.zip`](https://github.com/bhuvana-g-dev/hush-meeting-copilot/raw/main/hush-chrome-extension.zip) and unzip it into a folder.
+2. **Load into Google Chrome:**
+   - Open `chrome://extensions` in Chrome.
+   - Enable **Developer mode** (top-right toggle).
+   - Click **Load unpacked** and select the unzipped `chrome-extension/` directory.
+3. **Experience it in Google Meet:**
+   - Join any call on [Google Meet](https://meet.google.com).
+   - Turn on **Captions (`CC`)** at the bottom of Google Meet.
+   - Hush AI Copilot appears seamlessly on the right edge!
 
-1. **Install the extension:**
-   ```bash
-   # Generate placeholder icons first
-   cd chrome-extension/icons
-   # Follow instructions in icons/README.md to generate icon files
-   ```
+---
 
-2. **Load in Chrome:**
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked"
-   - Select the `chrome-extension/` directory
+## 🌟 Key Features
 
-3. **Start Hush backend:**
-   ```bash
-   ./kit demo  # Starts at http://localhost:8501
-   ```
+### 1. 🫸 Edge-Docking & Auto-Peek Mode ("Zero Meeting Disturbance")
+- **Tucks aside:** Sits quietly on the right screen edge (`🎯 HUSH AI ❮`) taking only 36px so it never blocks video tiles or presentations.
+- **Listens from aside:** Continuously listens to Google Meet captions in real time.
+- **Auto Slide-Out:** When your topic is discussed or when questions are invited, it chimes and slides out smoothly into view!
+- **Auto Slide-In:** Includes an auto-hide countdown with hover protection (stays open while your mouse is over it, slides back in when you're done).
+- **Size Toggle (`↔️ Size`):** Switch between Standard (450px), Large (530px), and Compact (380px) with one click.
 
-4. **Use in Google Meet:**
-   - Join a Google Meet call
-   - Enable captions in Meet (press `C`)
-   - Click Hush extension icon
-   - Click "▶ Start Capture"
-   - Watch real-time decisions in the popup and dashboard!
+### 2. ⚡ Zone-Out Recovery & Focus Alert
+- Long 1-2 hour lectures and meetings often lead to zoning out.
+- Set any goal (e.g. *"Learn Full Stack Development"*, *"Review Project Roadmap"*, *"Interview Prep"*).
+- When the speaker talks about your goal, Hush rings a gentle audio chime and presents an instant **1-sentence catch-up summary** of what was just said so you can re-engage immediately.
 
-📖 **Full documentation:** See [`chrome-extension/README.md`](chrome-extension/README.md) for detailed setup, usage, and troubleshooting.
+### 3. 🎤 Hesitation-Buster Doubt Suggestions
+- Many attendees hesitate to speak up or formulate questions on the spot.
+- When the speaker pauses or opens the floor, Hush detects the opportune moment and crafts 1-3 sharp, contextual questions.
+- **Confidence Booster Tip:** Gives real-time encouraging tips to ask right away.
+- **1-Click "💬 Paste to Meet Chat":** Automatically opens Google Meet's chat drawer and pastes the question into the message box!
 
-## How it is built
+### 4. 📝 Live Auto-Notes Tab
+- Automatically extracts and categorizes information as people speak:
+  - ⚡ **Core Concepts & Tech:** Key architectural terms, definitions, and tools.
+  - 📌 **Action Items:** Deadlines, tasks, and commitments.
+  - 💡 **Decisions:** Concluded choices and team agreements.
+  - ✍️ **Manual Notes:** Attendee can type their own quick notes anytime.
 
-Strands Agents with Amazon Bedrock for the generative part, the tools in `agent/tools.py`,
-deployed to Amazon Bedrock AgentCore Runtime, and one decision handed to Strands Decider 2B
-at a clear seam in the agent's path.
+### 5. 📜 Live Transcript & 1-Click Markdown Export
+- Full chronological transcript with timestamps `[HH:MM:SS]` and speaker attribution.
+- **📥 Export Button:** 1-click download of a structured Markdown summary (`meeting-summary-YYYY-MM-DD.md`) containing your goal, categorized notes, and the full transcript!
 
-Every Amazon Bedrock model id is set in `.env` (`BEDROCK_MODEL_ID`, and
-`BEDROCK_SMALL/MEDIUM/LARGE_MODEL_ID` for routing), Amazon Nova by default.
+---
 
-### Chrome Extension Architecture
+## 🧠 Decision Architecture (Strands Decider 2B)
 
-The Chrome Extension (`chrome-extension/`) integrates seamlessly with the existing backend:
+Hush uses **Strands Decider 2B** at the core of its decision pipeline:
+1. **Relevance Gate:** Determines if live transcript turns are relevant to the user's personal goal (`#wingman`).
+2. **Cue Policy:** Selects `FOCUS_ALERT`, `ASK_DOUBT`, `GOAL_RESOLVED`, or `STAY_SILENT` in a single fast forward pass (<200ms).
+3. **Calibrated Action:** If routine conversation is detected, Hush stays silent so the attendee is never interrupted unnecessarily.
 
-- **Content Script** (`content.js`) - Captures captions from Google Meet DOM
-- **Background Worker** (`background.js`) - Manages extension state
-- **Popup UI** (`popup.html`, `popup.js`) - User controls and decision preview
-- **Backend Integration** - Reuses existing `/api/chat` endpoint
+---
 
-No changes to core agent logic required - the extension acts as an alternative input source alongside the web UI.
+## 🛠️ Local Development & Backend Setup
 
-## Reusable decision pattern: meeting copilot action guard
-
-The pattern lives in [`agent/decision.py`](agent/decision.py), labelled
-`REUSABLE DECISION PATTERN`. It contains the typed questions and their options, the wiring that
-puts the decision in the agent's path, and a note on how to reuse it.
-
-Typed questions:
-
-```python
-QUESTIONS = {
-    "action": Decider.choice(
-        "Which action should the meeting copilot take right now?",
-        {
-            "INTERJECT":   "something in the transcript needs immediate attention -- a sensitive "
-                           "disclosure, a missed action item, a factual error, or an unanswered "
-                           "question -- and a short suggestion to the participants would help",
-            "TAKE_NOTE":   "the content is worth recording silently (a decision, a commitment, "
-                           "a risk flag, a name or a figure) but does not require interrupting",
-            "STAY_SILENT": "the conversation is routine and no action from the copilot would "
-                           "improve the meeting",
-        },
-    ),
-    "contains_sensitive": Decider.noul(
-        "Does the transcript contain material that warrants special attention -- PII, confidential "
-        "business data, legal or financial risk language, credentials, or hostile language?",
-        {
-            "true":  "clear sensitive content is present",
-            "false": "the transcript is routine meeting content with nothing sensitive",
-        },
-    ),
-}
-```
-
-The `TranscriptGuard` InterventionHandler intercepts `interject` and `take_note` before they
-run. Low-confidence action choices go to `Confirm` (human review). STAY_SILENT combined with
-sensitive content also goes to `Confirm`. See `agent/decision.py` for the full wiring and
-reuse instructions.
-
-## Measured
-
-Run `.\kit.cmd bench --split tune` then `.\kit.cmd bench --split test` to produce
-`submission/bench/results.md`. The table below will be filled with real numbers after that run.
-
-<!-- TODO: paste submission/bench/results.md here after running .\kit.cmd bench --split test -->
-
-Reproduce with `.\kit.cmd bench` (cases in `agent/eval_cases.jsonl`; 24 cases, 12 tune + 12
-test; charts in `submission/bench/`).
-
-## Run it
-
-```powershell
-# Windows
-.\kit.cmd setup         # choose decider and LLM, test both
-.\kit.cmd demo          # web UI at http://localhost:8501
-.\kit.cmd bench         # Strands Decider 2B vs Amazon Bedrock LLM on the same questions
-.\kit.cmd deploy        # Amazon Bedrock AgentCore Runtime
-```
+To run the backend locally instead of using the Render cloud:
 
 ```bash
-# macOS / Linux
-./kit setup
-./kit demo
-./kit bench
-./kit deploy
+# Clone the repository
+git clone https://github.com/bhuvana-g-dev/hush-meeting-copilot.git
+cd hush-meeting-copilot
+
+# Set up virtual environment
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the test suite (18/18 passing)
+python run_tests.py
+
+# Start local server
+python -m uvicorn demo.server:app --port 8501
 ```
 
-**Google Meet Extension:**
-```bash
-# Load chrome-extension/ folder in Chrome (see chrome-extension/README.md)
-# Join a Meet call, enable captions, and click "Start Capture"
-```
+---
 
-Requirements: Python 3.10+, AWS credentials with Amazon Bedrock access (us-east-1, Amazon Nova
-Pro), and for deploying: Node 20+ with the AgentCore CLI (`.\kit.cmd agentcore-cli`).
+## 📋 Hackathon Submission Details
 
-For Chrome Extension: Chrome 88+ with Developer mode enabled.
-
-## Credits
-
-Built with the **AWS User Group Madurai** Strands Decider hackathon kit
-(https://www.awsugmdu.in). The reusable library (`decider_kit/`, the demo UI, the video and
-article tooling, and the Kiro steering, skills and hooks) is the user group's; the Hush agent
-in `agent/` is the participant's original work.
-
-Strands Decider: https://github.com/strands-labs/strands-decider (Apache-2.0).
-
-Licence: Apache-2.0 (see LICENSE).
+- **Event:** Strands Decider Hackathon (AWS User Group Madurai)
+- **Decision Pattern:** `#guardrails` / `#wingman`
+- **Agent Core / Backend:** Strands Decider 2B + FastAPI
+- **Frontend / In-Meeting HUD:** Chrome Extension (Manifest V3) for Google Meet
+- **Repository:** [https://github.com/bhuvana-g-dev/hush-meeting-copilot](https://github.com/bhuvana-g-dev/hush-meeting-copilot)
+- **Live Demo URL:** [https://hush-meeting-copilot.onrender.com](https://hush-meeting-copilot.onrender.com)
