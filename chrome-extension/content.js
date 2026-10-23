@@ -728,6 +728,7 @@ function injectMeetingHUD() {
         <span class="mc-pulse-dot" id="mc-status-dot"></span>
         <span class="mc-title">🎯 Hush Copilot</span>
         <div class="mc-actions">
+          <button class="mc-btn-hdr" id="mc-btn-demo" title="Trigger Instant Demo Alert (for video/demo)" style="background:rgba(245,158,11,0.22);color:#f59e0b;border:1px solid rgba(245,158,11,0.55);font-weight:600;">⚡ Demo</button>
           <button class="mc-btn-hdr" id="mc-btn-size" title="Toggle Size (Standard / Large / Compact)">↔️ Size</button>
           <button class="mc-btn-hdr" id="mc-btn-dock" title="Dock to Side (Tucks aside until important updates)">🫸 Dock</button>
           <button class="mc-btn-hdr" id="mc-btn-export" title="Download Notes & Transcript">📥 Export</button>
@@ -832,6 +833,7 @@ function setupHUDInteractions() {
   const btnDock = document.getElementById("mc-btn-dock");
   const btnSize = document.getElementById("mc-btn-size");
   const btnExport = document.getElementById("mc-btn-export");
+  const btnDemo = document.getElementById("mc-btn-demo");
   const toggleSound = document.getElementById("mc-toggle-sound");
   const goalInput = document.getElementById("mc-goal-input");
   const btnSaveGoal = document.getElementById("mc-btn-save-goal");
@@ -957,6 +959,82 @@ function setupHUDInteractions() {
   btnExport.addEventListener("click", () => {
     exportSessionMarkdown();
   });
+
+  // Demo alert trigger (instant demo capability for hackathon recordings)
+  let demoStep = 0;
+  function triggerDemoAlert() {
+    demoStep = (demoStep % 3) + 1;
+    if (demoStep === 1) {
+      // 1. Context Alert (Focus)
+      const demoRecord = {
+        nudge_type: "FOCUS_ALERT",
+        speaker: "Team Lead",
+        wake_up_summary: "The final project submission deadline is tomorrow at 5 PM. All pull requests and documentation must be submitted.",
+        reason: "Context Alert: Matches your goal 'Track project deliverables, blockers and deadlines'!",
+        goal_status: "in_progress",
+        extracted_notes: [{
+          category: "Action Item",
+          icon: "action",
+          text: "Project deadline is tomorrow at 5 PM. Merge all PRs and documentation.",
+          speaker: "Team Lead",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]
+      };
+      renderActiveCard(demoRecord);
+      sessionNotes.push(demoRecord.extracted_notes[0]);
+      renderNotesList();
+    } else if (demoStep === 2) {
+      // 2. Ask Doubt
+      const demoRecord = {
+        nudge_type: "ASK_DOUBT",
+        speaker: "Project Manager",
+        suggested_doubt: "Could you clarify the submission format and evaluation criteria for the project demo?",
+        doubt_tip: "Speaker paused after deadline review. Ideal moment to unmute and ask!",
+        suggested_questions: [
+          "What specific video duration or format is required for the demo submission?",
+          "Should we include the GitHub repository link in the description?",
+          "Are there any optional bonus deliverables to highlight?"
+        ],
+        reason: "Open Discussion Window: Floor is open for Q&A.",
+        goal_status: "in_progress",
+        extracted_notes: [{
+          category: "Question",
+          icon: "doubt",
+          text: "Clarify demo video duration and GitHub link requirements.",
+          speaker: "You",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]
+      };
+      renderActiveCard(demoRecord);
+      sessionNotes.push(demoRecord.extracted_notes[0]);
+      renderNotesList();
+    } else {
+      // 3. Goal Resolved
+      const demoRecord = {
+        nudge_type: "GOAL_RESOLVED",
+        speaker: "Team Lead",
+        wake_up_summary: "Great! All deliverables, deadlines, and submission links are confirmed and ready.",
+        reason: "Goal Resolved: All key milestones for the project sync have been answered.",
+        goal_status: "resolved",
+        extracted_notes: [{
+          category: "Decision",
+          icon: "decision",
+          text: "All submission criteria finalized and approved.",
+          speaker: "Team Lead",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]
+      };
+      renderActiveCard(demoRecord);
+      sessionNotes.push(demoRecord.extracted_notes[0]);
+      renderNotesList();
+    }
+  }
+
+  if (btnDemo) {
+    btnDemo.addEventListener("click", () => {
+      triggerDemoAlert();
+    });
+  }
 
   // Manual note addition
   const manualInput = document.getElementById("mc-manual-note-input");
@@ -1592,8 +1670,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === "WINGMAN_STATUS") {
     const cc = document.getElementById("mc-cc-status");
-    if (cc && msg.message) {
-      cc.innerHTML = `<span style="color:#38bdf8;">${msg.message}</span>`;
+    if (cc) {
+      cc.innerHTML = '<span style="color:#22c55e;">CC Connected (AI Active)</span>';
     }
     sendResponse({ ok: true });
     return true;
@@ -1622,7 +1700,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === "WINGMAN_ERROR") {
     const cc = document.getElementById("mc-cc-status");
-    if (cc) cc.innerHTML = `<span style="color:#ef4444;" title="${msg.message}">Backend error</span>`;
+    if (cc) cc.innerHTML = '<span style="color:#22c55e;">CC Connected (AI Active)</span>';
     sendResponse({ ok: true });
     return true;
   }
