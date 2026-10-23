@@ -3,14 +3,20 @@
  * Runs directly on https://meet.google.com/*
  *
  * Responsibilities:
- * 1. Injects a floating, draggable in-meeting HUD overlay directly into Google Meet.
- * 2. 3-Tab Interface:
+ * 1. Injects a floating / dockable in-meeting HUD overlay directly into Google Meet.
+ * 2. Size Options: Standard (450px) / Large (530px) / Compact (380px) with 1-click toggle.
+ * 3. Edge-Docking & Auto-Peek Mode:
+ *    - Keeps copilot neatly aside at the right edge without disturbing the meeting video.
+ *    - Continues listening to live speech in the background.
+ *    - Automatically slides out when important updates arrive (Focus Alert or Hesitation-Buster Doubt).
+ *    - Automatically slides back in when done (with hover-pause protection).
+ * 4. 3-Tab Interface:
  *    - 🎯 Wingman: Real-time Focus/Zone-out recovery alerts & Hesitation-buster doubts.
  *    - 📝 Notes: Auto-extracted concepts, tools, action items + manual notes.
  *    - 📜 Transcript: Chronological live caption log with timestamps.
- * 3. 1-Click "Paste to Meet Chat" directly opens the chat drawer and inserts questions.
- * 4. 1-Click "📥 Export Notes & Transcript" downloads a clean Markdown file.
- * 5. Web Audio API chime for unobtrusive acoustic wake-up cues.
+ * 5. 1-Click "Paste to Meet Chat" directly opens the chat drawer and inserts questions.
+ * 6. 1-Click "📥 Export Notes & Transcript" downloads a clean Markdown file.
+ * 7. Web Audio API chime for unobtrusive acoustic wake-up cues.
  */
 
 "use strict";
@@ -21,7 +27,14 @@ let observer = null;
 let currentGoal = "";
 let soundEnabled = true;
 let isMinimized = false;
+let isDocked = true; // Default to edge-docked so it doesn't disturb meeting video
+let isSlideOut = false; // Whether the docked drawer is currently popped out
+let sizeMode = "standard"; // "standard" (450px) | "large" (530px) | "compact" (380px)
 let activeTab = "wingman"; // "wingman" | "notes" | "transcript"
+
+let autoDockTimer = null;
+let autoDockCountdown = 14;
+let isHoveringHUD = false;
 
 // Session stores
 let sessionNotes = [];
@@ -200,48 +213,131 @@ function injectMeetingHUD() {
 
   const root = document.createElement("div");
   root.id = "meet-copilot-hud-root";
+  root.className = `mc-size-${sizeMode} mc-docked`;
   root.innerHTML = `
     <style>
       #meet-copilot-hud-root {
         position: fixed !important;
-        top: 24px !important;
-        right: 24px !important;
+        top: 20px !important;
+        right: 20px !important;
         z-index: 2147483647 !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif !important;
-        font-size: 13px !important;
+        font-size: 13.5px !important;
         color: #f1f5f9 !important;
         display: block !important;
         visibility: visible !important;
         pointer-events: none !important;
+        transition: right 0.25s ease, top 0.25s ease;
       }
+
+      /* Edge-Docked State */
+      #meet-copilot-hud-root.mc-docked {
+        top: 14% !important;
+        right: 0px !important;
+        left: auto !important;
+        display: flex !important;
+        align-items: flex-start !important;
+      }
+
+      /* Edge Tab Handle (Visible when docked) */
+      .mc-edge-tab {
+        display: none;
+        pointer-events: auto;
+        cursor: pointer;
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-right: none;
+        border-radius: 10px 0 0 10px;
+        padding: 10px 8px;
+        box-shadow: -4px 6px 20px rgba(0, 0, 0, 0.5);
+        color: #f1f5f9;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        user-select: none;
+        transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+      }
+      #meet-copilot-hud-root.mc-docked .mc-edge-tab {
+        display: flex;
+      }
+      .mc-edge-tab:hover {
+        background: rgba(30, 41, 59, 0.98);
+        box-shadow: -6px 8px 24px rgba(56, 189, 248, 0.35);
+      }
+      .mc-edge-tab.alerting {
+        border-color: #f59e0b;
+        animation: mc-edge-pulse 1s infinite alternate;
+      }
+      @keyframes mc-edge-pulse {
+        from { box-shadow: -4px 0 16px rgba(245, 158, 11, 0.5); }
+        to { box-shadow: -8px 0 30px rgba(245, 158, 11, 0.9); }
+      }
+      .mc-edge-text {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        font-size: 11.5px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+      .mc-edge-arrow {
+        font-size: 12px;
+        color: #38bdf8;
+        transition: transform 0.25s ease;
+      }
+
+      /* Main HUD Window */
       .mc-hud {
         pointer-events: auto;
-        width: 380px;
-        max-height: 580px;
         background: rgba(15, 23, 42, 0.96);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 14px;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.06);
+        box-shadow: 0 24px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255,255,255,0.08);
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        transition: transform 0.2s ease, opacity 0.2s ease;
+        transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, width 0.2s ease;
+        max-height: 600px;
       }
+
+      /* Width sizes */
+      #meet-copilot-hud-root.mc-size-standard .mc-hud { width: 450px; }
+      #meet-copilot-hud-root.mc-size-large .mc-hud    { width: 530px; }
+      #meet-copilot-hud-root.mc-size-compact .mc-hud  { width: 380px; }
+
+      /* When docked: HUD is tucked off-screen by default */
+      #meet-copilot-hud-root.mc-docked .mc-hud {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+        transform: translateX(100%);
+      }
+      /* When popped out in docked mode */
+      #meet-copilot-hud-root.mc-docked .mc-hud.mc-slide-out {
+        transform: translateX(0);
+        box-shadow: -10px 24px 60px rgba(0, 0, 0, 0.75), 0 0 30px rgba(56, 189, 248, 0.25);
+      }
+      #meet-copilot-hud-root.mc-docked .mc-hud.mc-slide-out + .mc-edge-tab .mc-edge-arrow,
+      #meet-copilot-hud-root.mc-docked .mc-edge-tab.is-open .mc-edge-arrow {
+        transform: rotate(180deg);
+      }
+
+      /* Header Bar */
       .mc-header {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 10px 14px;
-        background: rgba(30, 41, 59, 0.8);
+        background: rgba(30, 41, 59, 0.85);
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         cursor: grab;
         user-select: none;
       }
       .mc-title {
         font-weight: 700;
-        font-size: 13px;
+        font-size: 14px;
         letter-spacing: -0.2px;
         display: flex;
         align-items: center;
@@ -264,45 +360,57 @@ function injectMeetingHUD() {
         align-items: center;
         gap: 5px;
       }
-      .mc-btn-icon {
-        background: transparent;
-        border: none;
-        color: #94a3b8;
+      .mc-btn-hdr {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #cbd5e1;
         cursor: pointer;
-        padding: 4px 6px;
+        padding: 4px 8px;
         border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-      }
-      .mc-btn-icon:hover { color: #fff; background: rgba(255,255,255,0.1); }
-      .mc-btn-export-hdr {
-        background: rgba(56, 189, 248, 0.15);
-        color: #38bdf8;
-        border: 1px solid rgba(56, 189, 248, 0.3);
-        border-radius: 6px;
-        padding: 3px 8px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
         display: flex;
         align-items: center;
         gap: 4px;
+        font-size: 11.5px;
+        font-weight: 600;
+        transition: all 0.15s ease;
       }
-      .mc-btn-export-hdr:hover { background: rgba(56, 189, 248, 0.25); color: #fff; }
+      .mc-btn-hdr:hover { color: #fff; background: rgba(255, 255, 255, 0.18); }
+      .mc-btn-hdr.active { background: rgba(56, 189, 248, 0.2); border-color: #38bdf8; color: #38bdf8; }
 
-      /* Tabs Bar */
+      /* Auto-Retreat Toast Banner */
+      .mc-auto-retreat-bar {
+        display: none;
+        padding: 6px 14px;
+        background: rgba(245, 158, 11, 0.16);
+        border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+        font-size: 11.5px;
+        color: #fde68a;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .mc-auto-retreat-bar.active { display: flex; }
+      .mc-auto-retreat-btn {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        border-radius: 4px;
+        padding: 2px 7px;
+        font-size: 10.5px;
+        cursor: pointer;
+      }
+      .mc-auto-retreat-btn:hover { background: rgba(255,255,255,0.2); }
+
+      /* Navigation Tabs */
       .mc-tabs {
         display: flex;
-        background: rgba(15, 23, 42, 0.9);
+        background: rgba(15, 23, 42, 0.92);
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
       .mc-tab {
         flex: 1;
-        padding: 8px 10px;
+        padding: 9px 12px;
         text-align: center;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
         color: #94a3b8;
         cursor: pointer;
@@ -311,7 +419,7 @@ function injectMeetingHUD() {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 5px;
+        gap: 6px;
       }
       .mc-tab:hover { color: #f1f5f9; background: rgba(255,255,255,0.03); }
       .mc-tab.active {
@@ -322,8 +430,8 @@ function injectMeetingHUD() {
       .mc-tab-badge {
         background: rgba(255,255,255,0.1);
         border-radius: 99px;
-        padding: 1px 6px;
-        font-size: 10px;
+        padding: 1px 7px;
+        font-size: 10.5px;
       }
 
       /* Tab Content Panels */
@@ -337,32 +445,32 @@ function injectMeetingHUD() {
 
       /* Goal section inside Wingman tab */
       .mc-goal-sec {
-        padding: 10px 14px;
+        padding: 12px 16px;
         border-bottom: 1px solid rgba(255,255,255,0.08);
         background: rgba(15, 23, 42, 0.5);
       }
       .mc-label {
         font-size: 11px;
-        font-weight: 600;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.06em;
         color: #94a3b8;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
         display: flex;
         justify-content: space-between;
       }
       .mc-goal-input-box {
         display: flex;
-        gap: 6px;
+        gap: 8px;
       }
       .mc-input {
         flex: 1;
         background: rgba(30, 41, 59, 0.85);
         border: 1px solid rgba(255,255,255,0.14);
         border-radius: 8px;
-        padding: 6px 10px;
+        padding: 7px 11px;
         color: #fff;
-        font-size: 12px;
+        font-size: 12.5px;
         outline: none;
       }
       .mc-input:focus { border-color: #38bdf8; }
@@ -371,7 +479,7 @@ function injectMeetingHUD() {
         color: #fff;
         border: none;
         border-radius: 8px;
-        padding: 6px 12px;
+        padding: 7px 14px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
@@ -383,15 +491,15 @@ function injectMeetingHUD() {
       .mc-chips {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 6px;
+        gap: 5px;
+        margin-top: 8px;
       }
       .mc-chip {
         background: rgba(51, 65, 85, 0.6);
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 99px;
-        padding: 2px 8px;
-        font-size: 10px;
+        padding: 3px 9px;
+        font-size: 11px;
         color: #cbd5e1;
         cursor: pointer;
       }
@@ -399,35 +507,35 @@ function injectMeetingHUD() {
 
       /* Wingman Feed Section */
       .mc-body {
-        padding: 12px 14px;
+        padding: 14px 16px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        max-height: 360px;
+        gap: 12px;
+        max-height: 380px;
         overflow-y: auto;
       }
 
       .mc-card {
-        border-radius: 10px;
-        padding: 10px 12px;
+        border-radius: 12px;
+        padding: 12px 14px;
         background: rgba(30, 41, 59, 0.7);
         border: 1px solid rgba(255,255,255,0.08);
         transition: all 0.25s ease;
       }
       .mc-card.focus-alert {
-        background: rgba(245, 158, 11, 0.14);
+        background: rgba(245, 158, 11, 0.15);
         border: 1px solid #f59e0b;
-        box-shadow: 0 0 18px rgba(245, 158, 11, 0.25);
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.28);
         animation: mc-card-pop 0.3s ease;
       }
       .mc-card.ask-doubt {
-        background: rgba(34, 197, 94, 0.14);
+        background: rgba(34, 197, 94, 0.15);
         border: 1px solid #22c55e;
-        box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.28);
         animation: mc-card-pop 0.3s ease;
       }
       .mc-card.goal-resolved {
-        background: rgba(59, 130, 246, 0.14);
+        background: rgba(59, 130, 246, 0.15);
         border: 1px solid #3b82f6;
       }
       @keyframes mc-card-pop { from { transform: scale(0.97); opacity: 0.5; } to { transform: scale(1); opacity: 1; } }
@@ -436,66 +544,68 @@ function injectMeetingHUD() {
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 6px;
+        margin-bottom: 7px;
         font-weight: 700;
-        font-size: 12px;
+        font-size: 12.5px;
       }
       .mc-badge-focus { color: #f59e0b; }
       .mc-badge-doubt { color: #22c55e; }
       .mc-badge-resolved { color: #38bdf8; }
 
       .mc-card-summary {
-        font-size: 12px;
-        line-height: 1.45;
+        font-size: 13.5px;
+        line-height: 1.5;
         color: #e2e8f0;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
       }
       .mc-doubt-quote {
-        background: rgba(15, 23, 42, 0.75);
+        background: rgba(15, 23, 42, 0.8);
         border-left: 3px solid #22c55e;
-        padding: 7px 10px;
-        border-radius: 0 6px 6px 0;
+        padding: 8px 12px;
+        border-radius: 0 8px 8px 0;
         font-style: italic;
-        font-size: 12px;
-        color: #f8fafc;
-        margin-bottom: 8px;
+        font-size: 13px;
+        line-height: 1.45;
+        color: #ffffff;
+        margin-bottom: 10px;
       }
       .mc-doubt-tip {
-        font-size: 11px;
+        font-size: 11.5px;
         color: #86efac;
-        background: rgba(34, 197, 94, 0.1);
+        background: rgba(34, 197, 94, 0.12);
         border-radius: 6px;
-        padding: 5px 8px;
-        margin-bottom: 8px;
-        line-height: 1.4;
+        padding: 6px 10px;
+        margin-bottom: 10px;
+        line-height: 1.45;
       }
 
       .mc-btn-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: 7px;
       }
       .mc-btn-sm {
         background: rgba(255,255,255,0.08);
-        border: 1px solid rgba(255,255,255,0.14);
+        border: 1px solid rgba(255,255,255,0.16);
         border-radius: 6px;
-        padding: 4px 9px;
-        font-size: 11px;
+        padding: 5px 11px;
+        font-size: 12px;
         font-weight: 600;
         color: #e2e8f0;
         cursor: pointer;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 5px;
         transition: background 0.15s;
       }
-      .mc-btn-sm:hover { background: rgba(255,255,255,0.18); color: #fff; }
+      .mc-btn-sm:hover { background: rgba(255,255,255,0.2); color: #fff; }
       .mc-btn-sm.primary { background: #16a34a; border-color: #22c55e; }
       .mc-btn-sm.primary:hover { background: #15803d; }
+      .mc-btn-sm.dock-now { background: rgba(15, 23, 42, 0.8); border-color: #94a3b8; }
 
       /* Notes Panel Styling */
       .mc-notes-bar {
-        padding: 8px 14px;
+        padding: 10px 16px;
         background: rgba(15, 23, 42, 0.4);
         border-bottom: 1px solid rgba(255,255,255,0.06);
         display: flex;
@@ -504,33 +614,33 @@ function injectMeetingHUD() {
       .mc-notes-input {
         flex: 1;
         background: rgba(30, 41, 59, 0.8);
-        border: 1px solid rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.12);
         border-radius: 6px;
-        padding: 5px 8px;
-        font-size: 11px;
+        padding: 6px 10px;
+        font-size: 12px;
         color: #fff;
         outline: none;
       }
       .mc-notes-list {
-        padding: 10px 14px;
+        padding: 12px 16px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        max-height: 320px;
+        gap: 9px;
+        max-height: 340px;
         overflow-y: auto;
       }
       .mc-note-item {
-        background: rgba(30, 41, 59, 0.6);
-        border: 1px solid rgba(255,255,255,0.06);
+        background: rgba(30, 41, 59, 0.65);
+        border: 1px solid rgba(255,255,255,0.08);
         border-radius: 8px;
-        padding: 7px 10px;
-        font-size: 12px;
+        padding: 8px 12px;
+        font-size: 12.5px;
       }
       .mc-note-tag {
-        font-size: 10px;
+        font-size: 10.5px;
         font-weight: 700;
         text-transform: uppercase;
-        margin-bottom: 3px;
+        margin-bottom: 4px;
         display: flex;
         justify-content: space-between;
         color: #94a3b8;
@@ -541,54 +651,54 @@ function injectMeetingHUD() {
 
       /* Transcript Panel Styling */
       .mc-transcript-list {
-        padding: 10px 14px;
+        padding: 12px 16px;
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        max-height: 360px;
+        gap: 7px;
+        max-height: 380px;
         overflow-y: auto;
       }
       .mc-transcript-item {
-        font-size: 11.5px;
-        line-height: 1.4;
+        font-size: 12px;
+        line-height: 1.45;
         color: #cbd5e1;
-        padding: 4px 6px;
-        border-radius: 4px;
-        background: rgba(30, 41, 59, 0.3);
+        padding: 5px 8px;
+        border-radius: 5px;
+        background: rgba(30, 41, 59, 0.35);
       }
       .mc-transcript-time {
         color: #64748b;
-        font-size: 10px;
+        font-size: 10.5px;
         font-family: monospace;
-        margin-right: 4px;
+        margin-right: 5px;
       }
 
       /* Footer status */
       .mc-footer {
-        padding: 7px 14px;
+        padding: 8px 16px;
         background: rgba(15, 23, 42, 0.85);
         border-top: 1px solid rgba(255,255,255,0.06);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font-size: 11px;
+        font-size: 11.5px;
         color: #64748b;
       }
 
-      /* Collapsed Pill */
+      /* Collapsed Pill (when minimized) */
       .mc-pill {
         display: none;
         pointer-events: auto;
         cursor: pointer;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(255,255,255,0.2);
-        padding: 8px 14px;
+        padding: 8px 16px;
         border-radius: 99px;
         box-shadow: 0 10px 25px rgba(0,0,0,0.5);
         align-items: center;
         gap: 8px;
         font-weight: 600;
-        font-size: 12px;
+        font-size: 12.5px;
         transition: transform 0.15s ease;
       }
       .mc-pill:hover { transform: scale(1.04); }
@@ -599,10 +709,17 @@ function injectMeetingHUD() {
       @keyframes mc-pill-glow { 0%, 100% { box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); } 50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.8); } }
     </style>
 
-    <!-- Collapsed Pill View -->
+    <!-- Edge Tab Handle (Visible on screen border when docked) -->
+    <div id="mc-edge-tab" class="mc-edge-tab" title="Click to view Hush Copilot">
+      <span class="mc-pulse-dot" id="mc-edge-dot"></span>
+      <span class="mc-edge-text">🎯 HUSH AI</span>
+      <span class="mc-edge-arrow" id="mc-edge-arrow">❮</span>
+    </div>
+
+    <!-- Collapsed Pill View (Alternate minimize option) -->
     <div id="mc-pill-view" class="mc-pill">
       <span class="mc-pulse-dot" id="mc-pill-dot"></span>
-      <span id="mc-pill-text">🎯 Meeting Copilot</span>
+      <span id="mc-pill-text">🎯 Hush Copilot</span>
     </div>
 
     <!-- Main Expanded HUD -->
@@ -611,10 +728,18 @@ function injectMeetingHUD() {
         <span class="mc-pulse-dot" id="mc-status-dot"></span>
         <span class="mc-title">🎯 Hush Copilot</span>
         <div class="mc-actions">
-          <button class="mc-btn-export-hdr" id="mc-btn-export" title="Download Notes & Transcript">📥 Export</button>
-          <button class="mc-btn-icon" id="mc-toggle-sound" title="Toggle audio alert">🔔</button>
-          <button class="mc-btn-icon" id="mc-btn-min" title="Minimize to pill">─</button>
+          <button class="mc-btn-hdr" id="mc-btn-size" title="Toggle Size (Standard / Large / Compact)">↔️ Size</button>
+          <button class="mc-btn-hdr" id="mc-btn-dock" title="Dock to Side (Tucks aside until important updates)">🫸 Dock</button>
+          <button class="mc-btn-hdr" id="mc-btn-export" title="Download Notes & Transcript">📥 Export</button>
+          <button class="mc-btn-hdr" id="mc-toggle-sound" title="Toggle audio alert" style="padding:4px 6px;">🔔</button>
+          <button class="mc-btn-hdr" id="mc-btn-min" title="Minimize to pill" style="padding:4px 6px;">─</button>
         </div>
+      </div>
+
+      <!-- Auto-Retreat Toast Banner (Appears when HUD auto-slides out on important updates) -->
+      <div id="mc-auto-retreat-bar" class="mc-auto-retreat-bar">
+        <span id="mc-retreat-text">⏱️ Auto-hiding in 14s (hover over window to keep open)</span>
+        <button class="mc-auto-retreat-btn" id="mc-btn-retreat-now">❮ Tuck Aside</button>
       </div>
 
       <!-- Navigation Tabs -->
@@ -657,7 +782,7 @@ function injectMeetingHUD() {
               <span>👂 Personal Wingman Active</span>
             </div>
             <div class="mc-card-summary" style="color:#94a3b8;">
-              Set your goal above. When the speaker touches your topic, you'll receive instant wake-up alerts and doubt suggestions.
+              Set your goal above. When docked aside, your copilot listens quietly in the background and will automatically slide out only when important topics or questions arise!
             </div>
           </div>
         </div>
@@ -667,7 +792,7 @@ function injectMeetingHUD() {
       <div class="mc-tab-panel" id="mc-panel-notes">
         <div class="mc-notes-bar">
           <input type="text" id="mc-manual-note-input" class="mc-notes-input" placeholder="Add your own quick note..." />
-          <button id="mc-btn-add-note" class="mc-btn-primary" style="padding:4px 10px;font-size:11px;">Add</button>
+          <button id="mc-btn-add-note" class="mc-btn-primary" style="padding:5px 12px;font-size:11.5px;">Add</button>
         </div>
         <div class="mc-notes-list" id="mc-notes-container">
           <div style="font-size:12px;color:#94a3b8;text-align:center;padding:24px 0;">
@@ -701,13 +826,117 @@ function injectMeetingHUD() {
 function setupHUDInteractions() {
   const root = document.getElementById("meet-copilot-hud-root");
   const mainHud = document.getElementById("mc-main-hud");
+  const edgeTab = document.getElementById("mc-edge-tab");
   const pillView = document.getElementById("mc-pill-view");
   const btnMin = document.getElementById("mc-btn-min");
+  const btnDock = document.getElementById("mc-btn-dock");
+  const btnSize = document.getElementById("mc-btn-size");
+  const btnExport = document.getElementById("mc-btn-export");
   const toggleSound = document.getElementById("mc-toggle-sound");
   const goalInput = document.getElementById("mc-goal-input");
   const btnSaveGoal = document.getElementById("mc-btn-save-goal");
-  const btnExport = document.getElementById("mc-btn-export");
   const dragHandle = document.getElementById("mc-drag-handle");
+  const btnRetreatNow = document.getElementById("mc-btn-retreat-now");
+
+  // Load preferences from storage
+  chrome.storage.local.get(["meeting_goal", "sound_enabled", "hud_size", "is_docked"], (data) => {
+    if (data.meeting_goal) {
+      currentGoal = data.meeting_goal;
+      goalInput.value = currentGoal;
+      updatePillText();
+    }
+    if (data.sound_enabled !== undefined) {
+      soundEnabled = data.sound_enabled;
+      toggleSound.textContent = soundEnabled ? "🔔" : "🔕";
+    }
+    if (data.hud_size) {
+      sizeMode = data.hud_size;
+      applySizeMode();
+    }
+    if (data.is_docked !== undefined) {
+      isDocked = data.is_docked;
+      applyDockState();
+    } else {
+      // Default to docked
+      applyDockState();
+    }
+  });
+
+  // Size cycle toggle: standard -> large -> compact -> standard
+  btnSize.addEventListener("click", () => {
+    if (sizeMode === "standard") sizeMode = "large";
+    else if (sizeMode === "large") sizeMode = "compact";
+    else sizeMode = "standard";
+
+    applySizeMode();
+    chrome.storage.local.set({ hud_size: sizeMode });
+  });
+
+  function applySizeMode() {
+    root.classList.remove("mc-size-standard", "mc-size-large", "mc-size-compact");
+    root.classList.add(`mc-size-${sizeMode}`);
+    btnSize.textContent = sizeMode === "large" ? "🔍 Large" : sizeMode === "compact" ? "📱 Compact" : "↔️ Standard";
+  }
+
+  // Edge Tab Click (Pull out / Push in)
+  edgeTab.addEventListener("click", () => {
+    if (isSlideOut) {
+      slideInHUD();
+    } else {
+      slideOutHUD();
+    }
+  });
+
+  // Dock toggle button
+  btnDock.addEventListener("click", () => {
+    isDocked = !isDocked;
+    applyDockState();
+    chrome.storage.local.set({ is_docked: isDocked });
+  });
+
+  function applyDockState() {
+    if (isDocked) {
+      root.classList.add("mc-docked");
+      btnDock.classList.add("active");
+      btnDock.textContent = "📌 Aside";
+      // Clear manual drag positioning
+      root.style.top = "";
+      root.style.left = "";
+      root.style.right = "0px";
+      slideInHUD();
+    } else {
+      root.classList.remove("mc-docked");
+      btnDock.classList.remove("active");
+      btnDock.textContent = "🫸 Dock";
+      mainHud.classList.remove("mc-slide-out");
+      cancelAutoDockCountdown();
+    }
+  }
+
+  // Hover detection over HUD to pause auto-dock retreat
+  mainHud.addEventListener("mouseenter", () => {
+    isHoveringHUD = true;
+    const retreatBar = document.getElementById("mc-auto-retreat-bar");
+    const retreatText = document.getElementById("mc-retreat-text");
+    if (retreatBar && retreatBar.classList.contains("active") && retreatText) {
+      retreatText.textContent = "📌 Pinned open while mouse is hovering";
+    }
+  });
+
+  mainHud.addEventListener("mouseleave", () => {
+    isHoveringHUD = false;
+    // If an alert is showing in docked mode, start graceful 5-second retreat
+    if (isDocked && isSlideOut && autoDockCountdown > 0) {
+      startAutoDockCountdown(5);
+    }
+  });
+
+  // Immediate retreat button
+  if (btnRetreatNow) {
+    btnRetreatNow.addEventListener("click", () => {
+      slideInHUD();
+    });
+  }
 
   // Tab switching
   const tabs = document.querySelectorAll(".mc-tab");
@@ -754,20 +983,7 @@ function setupHUDInteractions() {
     });
   }
 
-  // Load existing goal & settings from storage
-  chrome.storage.local.get(["meeting_goal", "sound_enabled"], (data) => {
-    if (data.meeting_goal) {
-      currentGoal = data.meeting_goal;
-      goalInput.value = currentGoal;
-      updatePillText();
-    }
-    if (data.sound_enabled !== undefined) {
-      soundEnabled = data.sound_enabled;
-      toggleSound.textContent = soundEnabled ? "🔔" : "🔕";
-    }
-  });
-
-  // Minimize / Expand toggles
+  // Minimize to Pill / Expand toggles
   btnMin.addEventListener("click", () => {
     isMinimized = true;
     mainHud.style.display = "none";
@@ -803,12 +1019,19 @@ function setupHUDInteractions() {
     });
   });
 
-  // Draggable HUD
+  // Draggable HUD (Only active when NOT edge-docked)
   let isDragging = false;
   let startX, startY, origX, origY;
 
   dragHandle.addEventListener("mousedown", (e) => {
     if (e.target.closest("button")) return;
+    if (isDocked) {
+      // Dragging out of dock undocks it
+      isDocked = false;
+      applyDockState();
+      chrome.storage.local.set({ is_docked: false });
+    }
+
     isDragging = true;
     dragHandle.style.cursor = "grabbing";
     startX = e.clientX;
@@ -836,6 +1059,61 @@ function setupHUDInteractions() {
   });
 }
 
+// ── Dock Slide In & Out Helpers ───────────────────────────────────────
+function slideOutHUD() {
+  const mainHud = document.getElementById("mc-main-hud");
+  const edgeTab = document.getElementById("mc-edge-tab");
+  if (mainHud) mainHud.classList.add("mc-slide-out");
+  if (edgeTab) edgeTab.classList.add("is-open");
+  isSlideOut = true;
+}
+
+function slideInHUD() {
+  const mainHud = document.getElementById("mc-main-hud");
+  const edgeTab = document.getElementById("mc-edge-tab");
+  const retreatBar = document.getElementById("mc-auto-retreat-bar");
+  if (mainHud) mainHud.classList.remove("mc-slide-out");
+  if (edgeTab) {
+    edgeTab.classList.remove("is-open");
+    edgeTab.classList.remove("alerting");
+  }
+  if (retreatBar) retreatBar.classList.remove("active");
+  cancelAutoDockCountdown();
+  isSlideOut = false;
+}
+
+function startAutoDockCountdown(seconds) {
+  cancelAutoDockCountdown();
+  autoDockCountdown = seconds;
+
+  const retreatBar = document.getElementById("mc-auto-retreat-bar");
+  const retreatText = document.getElementById("mc-retreat-text");
+  if (retreatBar) retreatBar.classList.add("active");
+
+  const tick = () => {
+    if (isHoveringHUD) return; // Do not decrement while user is hovering!
+
+    autoDockCountdown--;
+    if (retreatText) {
+      retreatText.textContent = `⏱️ Auto-hiding in ${autoDockCountdown}s (hover to keep open)`;
+    }
+
+    if (autoDockCountdown <= 0) {
+      slideInHUD();
+    }
+  };
+
+  if (retreatText) retreatText.textContent = `⏱️ Auto-hiding in ${autoDockCountdown}s (hover to keep open)`;
+  autoDockTimer = setInterval(tick, 1000);
+}
+
+function cancelAutoDockCountdown() {
+  if (autoDockTimer) {
+    clearInterval(autoDockTimer);
+    autoDockTimer = null;
+  }
+}
+
 function saveGoal(goal) {
   currentGoal = goal;
   const statusEl = document.getElementById("mc-goal-status");
@@ -846,14 +1124,14 @@ function saveGoal(goal) {
   // Reset feed
   renderActiveCard({
     nudge_type: "STAY_SILENT",
-    wake_up_summary: goal ? `Aim locked: "${goal}". Listening to Google Meet captions...` : "Monitoring live speech.",
+    wake_up_summary: goal ? `Aim locked: "${goal}". Listening quietly in the background...` : "Monitoring live speech.",
   });
 }
 
 function updatePillText() {
   const pillText = document.getElementById("mc-pill-text");
   if (pillText) {
-    pillText.textContent = currentGoal ? `🎯 Aim: ${currentGoal.slice(0, 24)}...` : "🎯 Meeting Copilot";
+    pillText.textContent = currentGoal ? `🎯 Aim: ${currentGoal.slice(0, 24)}...` : "🎯 Hush Copilot";
   }
 }
 
@@ -888,8 +1166,8 @@ function renderNotesList() {
           <span>${icon} ${n.category || 'Note'}</span>
           <span>${n.time || ''}</span>
         </div>
-        <div style="color:#f1f5f9;line-height:1.4;">${n.text}</div>
-        ${n.speaker ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px;">— ${n.speaker}</div>` : ''}
+        <div style="color:#f1f5f9;line-height:1.45;">${n.text}</div>
+        ${n.speaker ? `<div style="font-size:10.5px;color:#94a3b8;margin-top:4px;">— ${n.speaker}</div>` : ''}
       </div>
     `;
   }).join("");
@@ -912,7 +1190,7 @@ function renderTranscriptList() {
     return;
   }
 
-  container.innerHTML = sessionTranscript.slice(-40).map(t => `
+  container.innerHTML = sessionTranscript.slice(-45).map(t => `
     <div class="mc-transcript-item">
       <span class="mc-transcript-time">[${t.time}]</span>
       <span>${t.text}</span>
@@ -929,6 +1207,8 @@ function renderActiveCard(record) {
   const pillView = document.getElementById("mc-pill-view");
   const dot = document.getElementById("mc-status-dot");
   const pillDot = document.getElementById("mc-pill-dot");
+  const edgeTab = document.getElementById("mc-edge-tab");
+  const edgeDot = document.getElementById("mc-edge-dot");
   if (!feed) return;
 
   activeWingmanRecord = record;
@@ -936,7 +1216,7 @@ function renderActiveCard(record) {
   const speaker = record.speaker || "Speaker";
   const summary = record.wake_up_summary || "";
   const doubt = record.suggested_doubt || "";
-  const doubtTip = record.doubt_tip || "💡 Asking now clarifies concepts and keeps you 100% on track!";
+  const doubtTip = record.doubt_tip || "Don't hesitate to ask! Asking now clarifies concepts and keeps you 100% on track!";
   const questions = record.suggested_questions || [];
   const reason = record.reason || "";
 
@@ -946,7 +1226,15 @@ function renderActiveCard(record) {
     playChime();
     if (dot) dot.className = "mc-pulse-dot alerting";
     if (pillDot) pillDot.className = "mc-pulse-dot alerting";
+    if (edgeDot) edgeDot.className = "mc-pulse-dot alerting";
     if (pillView) pillView.classList.add("has-alert");
+    if (edgeTab) edgeTab.classList.add("alerting");
+
+    // Automatically slide out from edge if docked!
+    if (isDocked) {
+      slideOutHUD();
+      startAutoDockCountdown(14);
+    }
 
     cardHtml = `
       <div class="mc-card focus-alert">
@@ -955,16 +1243,27 @@ function renderActiveCard(record) {
         </div>
         <div class="mc-card-summary">
           <strong>${speaker}</strong> is discussing your topic:
-          <div style="margin-top:4px;">${summary}</div>
+          <div style="margin-top:6px;font-weight:500;">${summary}</div>
         </div>
-        ${reason ? `<div style="font-size:11px;color:#cbd5e1;margin-bottom:6px;">💡 ${reason}</div>` : ""}
+        ${reason ? `<div style="font-size:11.5px;color:#cbd5e1;margin-bottom:8px;">💡 ${reason}</div>` : ""}
+        <div class="mc-btn-row">
+          <button class="mc-btn-sm dock-now" id="mc-btn-dismiss-alert">❮ Tuck Aside</button>
+        </div>
       </div>
     `;
   } else if (nudge === "ASK_DOUBT") {
     playChime();
     if (dot) dot.className = "mc-pulse-dot alerting";
     if (pillDot) pillDot.className = "mc-pulse-dot alerting";
+    if (edgeDot) edgeDot.className = "mc-pulse-dot alerting";
     if (pillView) pillView.classList.add("has-alert");
+    if (edgeTab) edgeTab.classList.add("alerting");
+
+    // Automatically slide out from edge if docked!
+    if (isDocked) {
+      slideOutHUD();
+      startAutoDockCountdown(18); // Generous time to read and ask
+    }
 
     cardHtml = `
       <div class="mc-card ask-doubt">
@@ -974,18 +1273,19 @@ function renderActiveCard(record) {
         <div class="mc-card-summary">
           <strong>${speaker}</strong> just paused or opened the floor.
         </div>
-        <div class="mc-doubt-tip">${doubtTip}</div>
+        <div class="mc-doubt-tip">💡 ${doubtTip.replace(/^💡\s*/, "")}</div>
         <div class="mc-doubt-quote" id="mc-doubt-text">"${doubt || `Could you clarify how this connects to ${currentGoal}?`}"</div>
         <div class="mc-btn-row">
           <button class="mc-btn-sm primary" id="mc-btn-copy-doubt">📋 Copy Question</button>
           <button class="mc-btn-sm" id="mc-btn-paste-chat">💬 Paste to Meet Chat</button>
           <button class="mc-btn-sm" id="mc-btn-mark-asked">✅ Mark Asked</button>
+          <button class="mc-btn-sm dock-now" id="mc-btn-dismiss-alert">❮ Tuck Aside</button>
         </div>
         ${questions.length > 0 ? `
-          <div style="margin-top:8px;font-size:11px;color:#94a3b8;">Alternative questions:</div>
-          <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
+          <div style="margin-top:10px;font-size:11.5px;color:#94a3b8;font-weight:600;">Alternative questions:</div>
+          <div style="display:flex;flex-direction:column;gap:5px;margin-top:5px;">
             ${questions.map(q => `
-              <div class="mc-btn-sm mc-alt-q" style="font-size:11px;cursor:pointer;" title="Click to use this question">${q}</div>
+              <div class="mc-btn-sm mc-alt-q" style="font-size:11.5px;cursor:pointer;" title="Click to use this question">${q}</div>
             `).join("")}
           </div>
         ` : ''}
@@ -993,6 +1293,10 @@ function renderActiveCard(record) {
     `;
   } else if (nudge === "GOAL_RESOLVED") {
     playChime();
+    if (isDocked) {
+      slideOutHUD();
+      startAutoDockCountdown(10);
+    }
     cardHtml = `
       <div class="mc-card goal-resolved">
         <div class="mc-card-header mc-badge-resolved">
@@ -1001,12 +1305,16 @@ function renderActiveCard(record) {
         <div class="mc-card-summary">
           ${summary || "Your meeting goal appears to have been answered in this discussion."}
         </div>
+        <div class="mc-btn-row">
+          <button class="mc-btn-sm dock-now" id="mc-btn-dismiss-alert">❮ Tuck Aside</button>
+        </div>
       </div>
     `;
   } else {
     // Routine talk
     if (dot) dot.className = "mc-pulse-dot";
     if (pillDot) pillDot.className = "mc-pulse-dot";
+    if (edgeDot) edgeDot.className = "mc-pulse-dot";
 
     cardHtml = `
       <div class="mc-card">
@@ -1014,13 +1322,21 @@ function renderActiveCard(record) {
           <span>👂 Monitoring Meeting</span>
         </div>
         <div class="mc-card-summary" style="color:#94a3b8;">
-          ${summary || (currentGoal ? `Listening for: "${currentGoal}". Conversation is currently routine.` : "Monitoring live speech.")}
+          ${summary || (currentGoal ? `Listening quietly for: "${currentGoal}". Conversation is currently routine.` : "Monitoring live speech.")}
         </div>
       </div>
     `;
   }
 
   feed.innerHTML = cardHtml;
+
+  // Bind dismiss/tuck button
+  const dismissBtn = document.getElementById("mc-btn-dismiss-alert");
+  if (dismissBtn) {
+    dismissBtn.addEventListener("click", () => {
+      slideInHUD();
+    });
+  }
 
   // Bind doubt card buttons if rendered
   const copyBtn = document.getElementById("mc-btn-copy-doubt");
@@ -1050,6 +1366,9 @@ function renderActiveCard(record) {
         nudge_type: "GOAL_RESOLVED",
         wake_up_summary: "You asked your question! Copilot will continue tracking the response."
       });
+      setTimeout(() => {
+        if (isDocked) slideInHUD();
+      }, 2500);
     });
   }
 
