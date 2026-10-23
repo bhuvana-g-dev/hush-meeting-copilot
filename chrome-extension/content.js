@@ -27,9 +27,9 @@ let observer = null;
 let currentGoal = "";
 let soundEnabled = true;
 let isMinimized = false;
-let isDocked = true; // Default to edge-docked so it doesn't disturb meeting video
-let isSlideOut = false; // Whether the docked drawer is currently popped out
-let sizeMode = "standard"; // "standard" (450px) | "large" (530px) | "compact" (380px)
+let isDocked = false; // Default to open prominent HUD so the big interface is immediately available
+let isSlideOut = true;
+let sizeMode = "large"; // Default to Big HUD (560px wide)
 let activeTab = "wingman"; // "wingman" | "notes" | "transcript"
 
 let autoDockTimer = null;
@@ -213,7 +213,7 @@ function injectMeetingHUD() {
 
   const root = document.createElement("div");
   root.id = "meet-copilot-hud-root";
-  root.className = `mc-size-${sizeMode} mc-docked`;
+  root.className = `mc-size-${sizeMode}`;
   root.innerHTML = `
     <style>
       #meet-copilot-hud-root {
@@ -304,9 +304,9 @@ function injectMeetingHUD() {
       }
 
       /* Width sizes */
-      #meet-copilot-hud-root.mc-size-standard .mc-hud { width: 450px; }
-      #meet-copilot-hud-root.mc-size-large .mc-hud    { width: 530px; }
-      #meet-copilot-hud-root.mc-size-compact .mc-hud  { width: 380px; }
+      #meet-copilot-hud-root.mc-size-standard .mc-hud { width: 500px; }
+      #meet-copilot-hud-root.mc-size-large .mc-hud    { width: 560px; }
+      #meet-copilot-hud-root.mc-size-compact .mc-hud  { width: 420px; }
 
       /* When docked: HUD is tucked off-screen by default */
       #meet-copilot-hud-root.mc-docked .mc-hud {
@@ -853,15 +853,17 @@ function setupHUDInteractions() {
     }
     if (data.hud_size) {
       sizeMode = data.hud_size;
-      applySizeMode();
+    } else {
+      sizeMode = "large";
     }
+    applySizeMode();
+
     if (data.is_docked !== undefined) {
       isDocked = data.is_docked;
-      applyDockState();
     } else {
-      // Default to docked
-      applyDockState();
+      isDocked = false;
     }
+    applyDockState();
   });
 
   // Size cycle toggle: standard -> large -> compact -> standard
@@ -1617,6 +1619,127 @@ function finalizeLiveUtterance() {
   commitLine(speaker, text);
 }
 
+// ── Instant In-Meeting Speech Evaluator (0ms latency) ───────────────
+function evaluateInPageSpeech(text, speaker) {
+  if (!text) return;
+  const normText = text.toLowerCase();
+  const effectiveGoal = (currentGoal && currentGoal.trim()) ? currentGoal : "Track project deadline, deliverables and schedule";
+  const normGoal = effectiveGoal.toLowerCase();
+
+  const stopWords = new Set([
+    "the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for", "of", "with",
+    "by", "from", "and", "or", "but", "so", "as", "if", "when", "how", "what", "which", "who",
+    "whom", "this", "that", "these", "those", "my", "your", "our", "their", "his", "her", "its",
+    "i", "you", "we", "they", "it", "me", "us", "them", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "can", "could", "should", "would", "will", "shall", "may", "might", "must",
+    "about", "please", "since", "hello", "good", "morning", "afternoon", "students", "team"
+  ]);
+
+  const goalWords = normGoal
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.has(w));
+
+  const priorityTriggers = [
+    "deadline", "submission", "submit", "due date", "due by", "tomorrow", "tonight", "end of day",
+    "hackathon", "project", "presentation", "demo", "review", "deliverable", "milestone",
+    "blocker", "critical", "important", "urgent", "must do", "action item", "todo",
+    "full stack", "react", "frontend", "backend", "api", "database", "deploy", "merge", "pr", "schedule"
+  ];
+
+  const doubtTriggers = [
+    "?", "any question", "any questions", "any doubt", "any doubts", "what do you think",
+    "does anyone", "who wants to", "anyone have", "any thoughts", "feedback", "make sense",
+    "is that clear", "shall we", "do you agree", "any concerns"
+  ];
+
+  const resolutionTriggers = [
+    "approved", "agreed", "resolved", "completed", "done", "all set", "finalized"
+  ];
+
+  const matchedGoalWord = goalWords.find(w => normText.includes(w));
+  const matchedTrigger = priorityTriggers.find(t => normText.includes(t));
+  const isDoubt = doubtTriggers.some(d => normText.includes(d));
+  const isResolved = resolutionTriggers.some(r => normText.includes(r));
+
+  const actionIndicators = [
+    "deadline", "submit", "submission", "tomorrow", "today", "must", "need to",
+    "will deliver", "assigned", "action item", "presentation", "demo", "finish", "complete", "schedule"
+  ];
+  const shouldExtractNote = actionIndicators.some(ai => normText.includes(ai));
+
+  if (isDoubt) {
+    const topic = matchedGoalWord || matchedTrigger || "the project timeline and criteria";
+    const note = {
+      category: "Question Window",
+      icon: "doubt",
+      text: text,
+      speaker: speaker || "Speaker",
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    if (!sessionNotes.some(n => n.text === text)) {
+      sessionNotes.push(note);
+      renderNotesList();
+    }
+
+    renderActiveCard({
+      nudge_type: "ASK_DOUBT",
+      goal_relevance: matchedGoalWord ? "HIGH" : "MEDIUM",
+      speaker: speaker || "Speaker",
+      wake_up_summary: `Discussion window open: "${text}"`,
+      suggested_doubt: `Could you clarify the submission timeline and deliverables regarding ${topic}?`,
+      doubt_tip: "Speaker invited questions or paused. Unmute now to clarify your questions!",
+      suggested_questions: [
+        `Could you elaborate on the deadline and submission criteria?`,
+        `What are the immediate blockers or deliverables we should address?`,
+        `Is there any specific documentation needed for this demo?`
+      ],
+      reason: "Open Discussion Window: Questions or feedback invited.",
+      goal_status: "in_progress",
+    });
+    return;
+  }
+
+  if (matchedGoalWord || matchedTrigger) {
+    const topic = matchedGoalWord || matchedTrigger;
+    if (shouldExtractNote) {
+      const note = {
+        category: "Action Item",
+        icon: "action",
+        text: text,
+        speaker: speaker || "Speaker",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      if (!sessionNotes.some(n => n.text === text)) {
+        sessionNotes.push(note);
+        renderNotesList();
+      }
+    }
+
+    renderActiveCard({
+      nudge_type: "FOCUS_ALERT",
+      goal_relevance: "HIGH",
+      speaker: speaker || "Speaker",
+      wake_up_summary: `The speaker just mentioned key topic "${topic}": "${text}"`,
+      reason: `Context Alert: '${topic}' matches your active meeting goal or key priorities!`,
+      goal_status: "in_progress",
+    });
+    return;
+  }
+
+  if (isResolved && (matchedGoalWord || matchedTrigger)) {
+    renderActiveCard({
+      nudge_type: "GOAL_RESOLVED",
+      goal_relevance: "HIGH",
+      speaker: speaker || "Speaker",
+      wake_up_summary: `Goal item addressed: "${text}"`,
+      reason: "Discussion indicates key milestone has been finalized or agreed upon.",
+      goal_status: "resolved",
+    });
+    return;
+  }
+}
+
 function commitLine(speaker, text) {
   const clean = text.trim();
   if (!clean) return;
@@ -1630,6 +1753,9 @@ function commitLine(speaker, text) {
     text: line,
   });
   renderTranscriptList();
+
+  // Instant In-Page Wingman Evaluation (0ms latency — instant alert on speech!)
+  evaluateInPageSpeech(clean, speaker);
 
   // Send to AI immediately
   flushBuffer(false);

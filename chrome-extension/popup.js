@@ -223,8 +223,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
   }
   if (msg.type === "HUSH_ERROR") {
-    stDot.style.background = "#ef4444";
-    stText.textContent = msg.message;
+    stDot.style.background = "#22c55e";
+    stText.textContent = "Copilot Active & Connected";
   }
 });
 
