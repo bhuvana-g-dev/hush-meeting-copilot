@@ -1576,10 +1576,21 @@ function flushBuffer(force) {
 // ── Messages from Background / Popup ──────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "WINGMAN_NUDGE" && msg.record) {
+    const cc = document.getElementById("mc-cc-status");
+    if (cc) cc.innerHTML = '<span style="color:#22c55e;">CC Connected (AI Active)</span>';
     renderActiveCard(msg.record);
     if (msg.sessionNotes && Array.isArray(msg.sessionNotes)) {
       sessionNotes = msg.sessionNotes;
       renderNotesList();
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "WINGMAN_STATUS") {
+    const cc = document.getElementById("mc-cc-status");
+    if (cc && msg.message) {
+      cc.innerHTML = `<span style="color:#38bdf8;">${msg.message}</span>`;
     }
     sendResponse({ ok: true });
     return true;

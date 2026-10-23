@@ -123,60 +123,40 @@ async function handleSegment(segment, ts, explicitGoal) {
     });
   }
 
-  // Try wingman endpoint first
+  // Try wingman endpoint first with fallback and wake-up notification
   let result = null;
-  let usedUrl = backendUrl;
 
-  try {
-    let res = await fetch(`${backendUrl}/api/wingman`, {
+  async function postWingman(url) {
+    const res = await fetch(`${url}/api/wingman`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
     });
+    if (res.ok) return await res.json();
+    throw new Error(`HTTP ${res.status}`);
+  }
 
-    // If failed on primary, try fallback
-    if (!res.ok && backendUrl === DEFAULT_BACKEND) {
-      const fallbackRes = await fetch(`${FALLBACK_BACKEND}/api/wingman`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
-      }).catch(() => null);
-      if (fallbackRes && fallbackRes.ok) {
-        res = fallbackRes;
-        usedUrl = FALLBACK_BACKEND;
-      }
-    }
-
-    if (res.ok) {
-      result = await res.json();
-    } else {
-      // Fallback to /api/analyse
-      const analyseRes = await fetch(`${backendUrl}/api/analyse`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
-      });
-      if (analyseRes.ok) {
-        const analyseJson = await analyseRes.json();
-        result = analyseJson.wingman || {
-          nudge_type: "STAY_SILENT",
-          goal_relevance: "NONE",
-          wake_up_summary: "",
-          suggested_doubt: "",
-          doubt_tip: "",
-          suggested_questions: [],
-          extracted_notes: [],
-          reason: "",
-          goal_status: "pending",
-          decisions: analyseJson.decisions || []
-        };
-      }
-    }
+  try {
+    result = await postWingman(backendUrl);
   } catch (err) {
-    const errorMsg = `Cannot reach Wingman backend at ${backendUrl} (${err.message})`;
-    broadcastToMeetTabs({ type: "WINGMAN_ERROR", message: errorMsg });
-    broadcastToPopup({ type: "HUSH_ERROR", message: errorMsg });
-    return;
+    // If primary failed, try local fallback
+    if (backendUrl === DEFAULT_BACKEND) {
+      try {
+        result = await postWingman(FALLBACK_BACKEND);
+      } catch (localErr) {
+        // Both failed — notify that Render free tier might be waking up
+        broadcastToMeetTabs({
+          type: "WINGMAN_STATUS",
+          message: "Waking up cloud AI (takes ~30s on first load)..."
+        });
+        return;
+      }
+    } else {
+      const errorMsg = `Cannot reach backend at ${backendUrl} (${err.message})`;
+      broadcastToMeetTabs({ type: "WINGMAN_ERROR", message: errorMsg });
+      broadcastToPopup({ type: "HUSH_ERROR", message: errorMsg });
+      return;
+    }
   }
 
   if (!result) return;
