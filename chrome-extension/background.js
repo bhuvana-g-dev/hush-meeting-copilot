@@ -123,18 +123,24 @@ async function handleSegment(segment, ts, explicitGoal) {
     });
   }
 
-  // Resilient multi-target dispatch (Render Cloud -> Localhost fallback)
+  // Resilient multi-target dispatch (Localhost ultra-fast -> Render Cloud)
   let result = null;
-  const targetUrls = [DEFAULT_BACKEND, FALLBACK_BACKEND];
+  const targetUrls = [FALLBACK_BACKEND, DEFAULT_BACKEND];
   let lastErr = null;
 
   for (const url of targetUrls) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const res = await fetch(`${url}/api/wingman`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ segment, goal, session_id: SESSION_ID }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+
       if (res.ok) {
         result = await res.json();
         break;
@@ -145,7 +151,7 @@ async function handleSegment(segment, ts, explicitGoal) {
   }
 
   if (!result) {
-    const errorMsg = lastErr ? lastErr.message : "Server waking up";
+    const errorMsg = lastErr ? (lastErr.name === "AbortError" ? "Server timeout" : lastErr.message) : "Server offline";
     broadcastToMeetTabs({
       type: "WINGMAN_STATUS",
       message: `Connecting to AI server... (${errorMsg})`
