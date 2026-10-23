@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Meeting Copilot</title>
+<title>Hush Copilot</title>
 <style>
 :root {
   --bg: #0B132B; --surf: #1C2541; --raised: #253256;
@@ -13,7 +13,7 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  width: 350px; min-height: 480px; max-height: 600px;
+  width: 380px; min-height: 520px; max-height: 600px;
   background: var(--bg); color: var(--ink);
   font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
@@ -24,42 +24,69 @@ body {
 /* Header */
 .hdr {
   display: flex; align-items: center; gap: 8px;
-  padding: 12px 14px; border-bottom: 1px solid var(--b1);
+  padding: 10px 14px; border-bottom: 1px solid var(--b1);
   background: var(--surf); flex-shrink: 0;
 }
-.logo { font-weight: 700; font-size: 14px; letter-spacing: -0.2px; }
+.logo { font-weight: 700; font-size: 13px; letter-spacing: -0.2px; }
 .dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--green); box-shadow: 0 0 8px var(--green);
   margin-right: 6px; vertical-align: middle;
 }
-.hdr-right { margin-left: auto; font-size: 11px; color: var(--primary); font-weight: 500; }
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.btn-export {
+  background: rgba(56, 189, 248, 0.15); color: var(--primary);
+  border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 5px;
+  padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.btn-export:hover { background: rgba(56, 189, 248, 0.25); color: #fff; }
+
+/* Navigation Tabs */
+.tabs {
+  display: flex; background: var(--surf); border-bottom: 1px solid var(--b1); flex-shrink: 0;
+}
+.tab {
+  flex: 1; padding: 7px 10px; text-align: center; font-size: 11px;
+  font-weight: 600; color: var(--ink2); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.15s ease;
+}
+.tab:hover { color: var(--ink); }
+.tab.active {
+  color: var(--primary); border-bottom-color: var(--primary);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+/* Tab Panels */
+.tab-panel {
+  display: none; flex-direction: column; flex: 1; overflow-y: auto;
+}
+.tab-panel.active { display: flex; }
 
 /* Aim / Goal input */
 .goal-sec {
-  padding: 12px 14px; border-bottom: 1px solid var(--b1);
+  padding: 10px 14px; border-bottom: 1px solid var(--b1);
   background: var(--surf); flex-shrink: 0;
 }
 .label {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.05em; color: var(--ink2); margin-bottom: 6px;
+  letter-spacing: 0.05em; color: var(--ink2); margin-bottom: 5px;
   display: flex; justify-content: space-between;
 }
 .goal-row { display: flex; gap: 6px; }
 .input-goal {
   flex: 1; background: var(--raised); border: 1px solid var(--b1);
-  border-radius: 6px; padding: 7px 10px; color: var(--ink);
+  border-radius: 6px; padding: 6px 10px; color: var(--ink);
   font-size: 12px; outline: none;
 }
 .input-goal:focus { border-color: var(--primary); }
 .btn-save-goal {
   background: #2563eb; color: #fff; border: none;
-  border-radius: 6px; padding: 7px 12px; font-weight: 600; font-size: 12px;
-  cursor: pointer; transition: background 0.15s;
+  border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: 12px;
+  cursor: pointer; transition: background 0.15s; white-space: nowrap;
 }
 .btn-save-goal:hover { background: #1d4ed8; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .chip {
   background: var(--raised); border: 1px solid var(--b1);
   border-radius: 99px; padding: 2px 8px; font-size: 10px;
@@ -70,7 +97,7 @@ body {
 /* Status Bar */
 .status-bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 14px; border-bottom: 1px solid var(--b1);
+  padding: 6px 14px; border-bottom: 1px solid var(--b1);
   background: rgba(11, 19, 43, 0.7); flex-shrink: 0;
 }
 .st-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
@@ -87,13 +114,13 @@ body {
   border-radius: 10px; padding: 10px 12px;
 }
 .card.focus-alert {
-  background: rgba(245, 158, 11, 0.12); border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.14); border-color: var(--accent);
 }
 .card.ask-doubt {
-  background: rgba(34, 197, 94, 0.12); border-color: var(--green);
+  background: rgba(34, 197, 94, 0.14); border-color: var(--green);
 }
 .card.goal-resolved {
-  background: rgba(56, 189, 248, 0.12); border-color: var(--primary);
+  background: rgba(56, 189, 248, 0.14); border-color: var(--primary);
 }
 .card-hdr {
   display: flex; align-items: center; gap: 6px;
@@ -105,6 +132,10 @@ body {
   padding: 6px 8px; border-radius: 0 4px 4px 0; font-style: italic;
   font-size: 12px; margin-bottom: 6px;
 }
+.doubt-tip {
+  font-size: 11px; color: #86efac; background: rgba(34, 197, 94, 0.12);
+  border-radius: 5px; padding: 5px 8px; margin-bottom: 6px; line-height: 1.4;
+}
 .btn-action {
   background: rgba(255,255,255,0.1); border: 1px solid var(--b2);
   border-radius: 5px; padding: 4px 10px; font-size: 11px;
@@ -113,9 +144,34 @@ body {
 .btn-action:hover { background: rgba(255,255,255,0.2); }
 .btn-action.green { background: #16a34a; border-color: var(--green); }
 
+/* Notes List */
+.notes-container {
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1;
+}
+.note-item {
+  background: var(--surf); border: 1px solid var(--b1);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px;
+}
+.note-tag {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  margin-bottom: 4px; display: flex; justify-content: space-between;
+}
+.note-tag.concept { color: var(--primary); }
+.note-tag.action { color: var(--accent); }
+.note-tag.decision { color: var(--green); }
+
+/* Transcript List */
+.transcript-container {
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1;
+}
+.transcript-item {
+  font-size: 11px; line-height: 1.4; color: var(--ink2);
+  padding: 4px 6px; background: rgba(255,255,255,0.03); border-radius: 4px;
+}
+
 /* Settings */
 .settings {
-  padding: 8px 12px; border-top: 1px solid var(--b1);
+  padding: 7px 12px; border-top: 1px solid var(--b1);
   display: flex; gap: 6px; align-items: center; background: var(--surf); flex-shrink: 0;
 }
 .url-input {
@@ -133,37 +189,66 @@ body {
 <body>
 
 <div class="hdr">
-  <span class="logo"><span class="dot" id="hdr-dot"></span>Meeting Copilot</span>
-  <span class="hdr-right">Strands Decider 2B</span>
-</div>
-
-<div class="goal-sec">
-  <div class="label">
-    <span>Your Aim in This Meeting</span>
-    <span id="goal-status" style="color:var(--primary);">Listening</span>
-  </div>
-  <div class="goal-row">
-    <input type="text" id="goal-input" class="input-goal" placeholder="e.g. Ask if deadline can move to Friday..." />
-    <button id="btn-save-goal" class="btn-save-goal">Set Aim</button>
-  </div>
-  <div class="chips">
-    <span class="chip" data-goal="Ask about project deadline and schedule">🕒 Deadline</span>
-    <span class="chip" data-goal="Clarify who owns the authentication service">👤 Ownership</span>
-    <span class="chip" data-goal="Inquire about budget limits and cost impact">💰 Budget</span>
-    <span class="chip" data-goal="Ask about API migration testing plan">❓ API Migration</span>
+  <span class="logo"><span class="dot" id="hdr-dot"></span>Hush Copilot</span>
+  <div class="hdr-right">
+    <button class="btn-export" id="btn-export-popup">📥 Export</button>
   </div>
 </div>
 
-<div class="status-bar">
-  <span class="st-dot" id="st-dot"></span>
-  <span class="st-text" id="st-text">Monitoring Google Meet captions...</span>
+<div class="tabs">
+  <div class="tab active" data-tab="wingman" id="tab-wingman">🎯 Wingman</div>
+  <div class="tab" data-tab="notes" id="tab-notes">📝 Notes (<span id="notes-count">0</span>)</div>
+  <div class="tab" data-tab="transcript" id="tab-transcript">📜 Transcript</div>
 </div>
 
-<div class="feed" id="feed">
-  <div class="card" id="initial-card">
-    <div class="card-hdr" style="color:var(--ink2);">🎯 Personal Wingman Ready</div>
-    <div class="card-text">
-      During live meetings on Google Meet, your copilot alerts you when your main topic is discussed, catches you up if you zone out, and cues the right moment to ask doubts.
+<!-- PANEL 1: WINGMAN -->
+<div class="tab-panel active" id="panel-wingman">
+  <div class="goal-sec">
+    <div class="label">
+      <span>Your Aim in This Meeting</span>
+      <span id="goal-status" style="color:var(--primary);">Listening</span>
+    </div>
+    <div class="goal-row">
+      <input type="text" id="goal-input" class="input-goal" placeholder="e.g. Master Full Stack Development..." />
+      <button id="btn-save-goal" class="btn-save-goal">Set Aim</button>
+    </div>
+    <div class="chips">
+      <span class="chip" data-goal="Learn full stack development, React and backend APIs">🚀 Full Stack Dev</span>
+      <span class="chip" data-goal="Understand system architecture, database indexing and deployment">🛠️ Tech & Architecture</span>
+      <span class="chip" data-goal="Track project deliverables, blockers and deadlines">💼 Project Sync</span>
+      <span class="chip" data-goal="Capture technical interview questions and key concepts">🎯 Interview Prep</span>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span class="st-dot" id="st-dot"></span>
+    <span class="st-text" id="st-text">Monitoring Google Meet captions...</span>
+  </div>
+
+  <div class="feed" id="feed">
+    <div class="card" id="initial-card">
+      <div class="card-hdr" style="color:var(--ink2);">🎯 Personal Wingman Ready</div>
+      <div class="card-text">
+        During live meetings on Google Meet, your copilot alerts you when your main topic is discussed, catches you up if you zone out, and cues the right moment to ask doubts.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PANEL 2: NOTES -->
+<div class="tab-panel" id="panel-notes">
+  <div class="notes-container" id="notes-container">
+    <div style="font-size:12px;color:var(--ink2);text-align:center;padding:24px 0;">
+      No notes yet. Takeaways and actions appear as people speak.
+    </div>
+  </div>
+</div>
+
+<!-- PANEL 3: TRANSCRIPT -->
+<div class="tab-panel" id="panel-transcript">
+  <div class="transcript-container" id="transcript-container">
+    <div style="font-size:12px;color:var(--ink2);text-align:center;padding:24px 0;">
+      Spoken captions will appear here chronologically.
     </div>
   </div>
 </div>

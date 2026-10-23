@@ -6,7 +6,7 @@
  * 1. Receive HUSH_SEGMENT messages from the content script.
  * 2. POST them to the Hush backend (/api/analyse or /api/wingman).
  * 3. Forward the response back to the in-meeting HUD and popup.
- * 4. Maintain a ring buffer of the last 50 decisions for popup display.
+ * 4. Maintain session state: decision history, auto-extracted notes, and transcript.
  */
 
 "use strict";
@@ -14,10 +14,12 @@
 const DEFAULT_BACKEND = "https://hush-meeting-copilot.onrender.com";
 const FALLBACK_BACKEND = "http://localhost:8501";
 const SESSION_ID = "gmeet-" + Date.now();
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 60;
 
 // Ring buffer of decision and wingman records for popup display.
 const decisionHistory = [];
+const sessionNotes = [];
+const sessionTranscript = [];
 
 // ── storage helpers ───────────────────────────────────────────────────
 async function getBackendUrl() {
@@ -61,7 +63,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "HUSH_GET_HISTORY") {
-    sendResponse({ history: decisionHistory });
+    sendResponse({
+      history: decisionHistory,
+      notes: sessionNotes,
+      transcript: sessionTranscript,
+    });
+    return true;
+  }
+
+  if (msg.type === "HUSH_SAVE_NOTE") {
+    if (msg.note) {
+      sessionNotes.push(msg.note);
+      chrome.storage.local.set({ hush_session_notes: sessionNotes });
+    }
+    sendResponse({ ok: true, notes: sessionNotes });
     return true;
   }
 
@@ -72,10 +87,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "HUSH_CONTENT_READY") {
-    // Content script loaded — notify it with the stored goal if any
+    // Content script loaded — notify it with stored data
     getGoal().then(goal => {
       if (sender && sender.tab && sender.tab.id) {
-        chrome.tabs.sendMessage(sender.tab.id, { type: "WINGMAN_GOAL_UPDATED", goal }).catch(() => {});
+        chrome.tabs.sendMessage(sender.tab.id, {
+          type: "WINGMAN_GOAL_UPDATED",
+          goal,
+          notes: sessionNotes,
+          transcript: sessionTranscript,
+        }).catch(() => {});
       }
     });
     return false;
@@ -93,6 +113,15 @@ async function handleSegment(segment, ts, explicitGoal) {
 
   const goal = explicitGoal !== undefined ? explicitGoal : await getGoal();
   let backendUrl = await getBackendUrl();
+
+  // Record into session transcript
+  const cleanLines = segment.split("\n").filter(l => l.trim().length > 0);
+  for (const line of cleanLines) {
+    sessionTranscript.push({
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      text: line,
+    });
+  }
 
   // Try wingman endpoint first
   let result = null;
@@ -134,6 +163,9 @@ async function handleSegment(segment, ts, explicitGoal) {
           goal_relevance: "NONE",
           wake_up_summary: "",
           suggested_doubt: "",
+          doubt_tip: "",
+          suggested_questions: [],
+          extracted_notes: [],
           reason: "",
           goal_status: "pending",
           decisions: analyseJson.decisions || []
@@ -149,6 +181,19 @@ async function handleSegment(segment, ts, explicitGoal) {
 
   if (!result) return;
 
+  // Collect any extracted notes into session notes
+  if (result.extracted_notes && Array.isArray(result.extracted_notes)) {
+    for (const n of result.extracted_notes) {
+      const isDuplicate = sessionNotes.some(existing => existing.text === n.text);
+      if (!isDuplicate) {
+        sessionNotes.push({
+          ...n,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+      }
+    }
+  }
+
   const record = {
     ts: ts || Date.now(),
     segment,
@@ -157,6 +202,9 @@ async function handleSegment(segment, ts, explicitGoal) {
     nudge_type: result.nudge_type || "STAY_SILENT",
     wake_up_summary: result.wake_up_summary || "",
     suggested_doubt: result.suggested_doubt || "",
+    doubt_tip: result.doubt_tip || "",
+    suggested_questions: result.suggested_questions || [],
+    extracted_notes: result.extracted_notes || [],
     speaker: result.speaker || "",
     reason: result.reason || "",
     goal_status: result.goal_status || "pending",
@@ -166,11 +214,21 @@ async function handleSegment(segment, ts, explicitGoal) {
   decisionHistory.push(record);
   if (decisionHistory.length > MAX_HISTORY) decisionHistory.shift();
 
-  // Send wingman alert directly to in-meeting HUD on Google Meet
-  broadcastToMeetTabs({ type: "WINGMAN_NUDGE", record });
+  // Send wingman alert, notes and transcript directly to in-meeting HUD on Google Meet
+  broadcastToMeetTabs({
+    type: "WINGMAN_NUDGE",
+    record,
+    sessionNotes,
+    latestLines: cleanLines,
+  });
 
   // Also broadcast to popup
-  broadcastToPopup({ type: "WINGMAN_NUDGE", record });
+  broadcastToPopup({
+    type: "WINGMAN_NUDGE",
+    record,
+    sessionNotes,
+    latestLines: cleanLines,
+  });
   broadcastToPopup({ type: "HUSH_RESULT", record });
 }
 

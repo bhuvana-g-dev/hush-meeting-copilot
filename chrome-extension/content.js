@@ -4,28 +4,35 @@
  *
  * Responsibilities:
  * 1. Injects a floating, draggable in-meeting HUD overlay directly into Google Meet.
- * 2. Allows attendee to set/edit their meeting goal/aim.
- * 3. Listens to Google Meet's live captions in real time.
- * 4. Dispatches segments to backend for Strands Decider 2B & LLM analysis.
- * 5. Displays real-time Focus Alerts (wake-up recovery when zoned out) and
- *    opportune "Ask Your Doubt Now" cues with copy/paste directly into Meet chat.
+ * 2. 3-Tab Interface:
+ *    - 🎯 Wingman: Real-time Focus/Zone-out recovery alerts & Hesitation-buster doubts.
+ *    - 📝 Notes: Auto-extracted concepts, tools, action items + manual notes.
+ *    - 📜 Transcript: Chronological live caption log with timestamps.
+ * 3. 1-Click "Paste to Meet Chat" directly opens the chat drawer and inserts questions.
+ * 4. 1-Click "📥 Export Notes & Transcript" downloads a clean Markdown file.
+ * 5. Web Audio API chime for unobtrusive acoustic wake-up cues.
  */
 
 "use strict";
 
 // ── State ─────────────────────────────────────────────────────────────
-let capturing = true; // Auto-start capture for live wingman
+let capturing = true;
 let observer = null;
 let currentGoal = "";
 let soundEnabled = true;
 let isMinimized = false;
-let recentAlerts = [];
+let activeTab = "wingman"; // "wingman" | "notes" | "transcript"
+
+// Session stores
+let sessionNotes = [];
+let sessionTranscript = [];
+let activeWingmanRecord = null;
 
 const lastText = new WeakMap();
 const lastSpeaker = new WeakMap();
 let lineBuffer = [];
 let flushTimer = null;
-const FLUSH_DELAY_MS = 2500;
+const FLUSH_DELAY_MS = 2400;
 const MAX_BUFFER_LINES = 6;
 let lastSentText = "";
 
@@ -73,7 +80,7 @@ function playChime() {
     osc.start();
     osc.stop(ctx.currentTime + 0.35);
   } catch (e) {
-    // Audio context may require prior interaction
+    // Audio context may require user interaction first
   }
 }
 
@@ -81,16 +88,18 @@ function playChime() {
 function pasteToMeetChat(text) {
   if (!text) return false;
 
-  // 1. Check if chat drawer is open; if not, open it
-  let chatInput = document.querySelector('textarea[aria-label*="Send a message" i], textarea[name="chatTextInput"], textarea[aria-label*="chat" i]');
+  // 1. Try to find the chat input
+  let chatInput = document.querySelector('textarea[aria-label*="Send a message" i], textarea[name="chatTextInput"], textarea[aria-label*="chat" i], div[contenteditable="true"][aria-label*="Send a message" i]');
+  
   if (!chatInput) {
+    // Open chat drawer
     const chatBtn = document.querySelector('button[aria-label*="chat" i], [data-panel-id="2"], button[aria-label*="Chat with everyone" i]');
     if (chatBtn) {
       chatBtn.click();
     }
   }
 
-  // 2. Retry finding the chat input after short delay
+  // 2. Insert into chat input
   setTimeout(() => {
     chatInput = document.querySelector('textarea[aria-label*="Send a message" i], textarea[name="chatTextInput"], textarea[aria-label*="chat" i], div[contenteditable="true"][aria-label*="Send a message" i]');
     if (chatInput) {
@@ -104,11 +113,85 @@ function pasteToMeetChat(text) {
       }
       return true;
     }
-    // Fallback: copy to clipboard
+    // Fallback: clipboard
     navigator.clipboard.writeText(text);
-  }, 250);
+  }, 300);
 
   return true;
+}
+
+// ── Export Notes & Transcript as Markdown ─────────────────────────────
+function exportSessionMarkdown() {
+  const dateStr = new Date().toLocaleDateString();
+  const timeStr = new Date().toLocaleTimeString();
+  
+  let md = `# Meeting Copilot — Session Summary\n`;
+  md += `**Date:** ${dateStr} at ${timeStr}\n`;
+  md += `**Meeting Aim / Goal:** ${currentGoal || "General Meeting Tracking"}\n\n`;
+  md += `---\n\n`;
+
+  md += `## 📝 Structured Notes & Key Takeaways (${sessionNotes.length})\n\n`;
+  if (sessionNotes.length === 0) {
+    md += `_No notes recorded during this session._\n\n`;
+  } else {
+    const concepts = sessionNotes.filter(n => n.category === "Core Concept");
+    const actions = sessionNotes.filter(n => n.category === "Action Item");
+    const decisions = sessionNotes.filter(n => n.category === "Decision");
+    const manuals = sessionNotes.filter(n => n.category === "User Note");
+
+    if (concepts.length > 0) {
+      md += `### ⚡ Core Concepts & Tools\n`;
+      concepts.forEach(n => {
+        md += `- **[${n.time || ''}] ${n.speaker || 'Speaker'}:** ${n.text}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (actions.length > 0) {
+      md += `### 📌 Action Items & Commitments\n`;
+      actions.forEach(n => {
+        md += `- [ ] **[${n.time || ''}] ${n.speaker || 'Speaker'}:** ${n.text}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (decisions.length > 0) {
+      md += `### 💡 Decisions & Key Points\n`;
+      decisions.forEach(n => {
+        md += `- **[${n.time || ''}] ${n.speaker || 'Speaker'}:** ${n.text}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (manuals.length > 0) {
+      md += `### ✍️ Attendee Personal Notes\n`;
+      manuals.forEach(n => {
+        md += `- **[${n.time || ''}]:** ${n.text}\n`;
+      });
+      md += `\n`;
+    }
+  }
+
+  md += `---\n\n`;
+  md += `## 📜 Full Spoken Transcript (${sessionTranscript.length} entries)\n\n`;
+  if (sessionTranscript.length === 0) {
+    md += `_No captions recorded._\n`;
+  } else {
+    sessionTranscript.forEach(t => {
+      md += `\`[${t.time}]\` ${t.text}\n\n`;
+    });
+  }
+
+  // Create download link
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `meeting-summary-${new Date().toISOString().slice(0, 10)}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ── Inject Floating In-Meeting HUD Overlay ─────────────────────────────
@@ -133,13 +216,14 @@ function injectMeetingHUD() {
       }
       .mc-hud {
         pointer-events: auto;
-        width: 360px;
-        background: rgba(15, 23, 42, 0.94);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        width: 380px;
+        max-height: 580px;
+        background: rgba(15, 23, 42, 0.96);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 14px;
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255,255,255,0.05);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.06);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -150,7 +234,7 @@ function injectMeetingHUD() {
         align-items: center;
         gap: 8px;
         padding: 10px 14px;
-        background: rgba(30, 41, 59, 0.7);
+        background: rgba(30, 41, 59, 0.8);
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         cursor: grab;
         user-select: none;
@@ -172,20 +256,20 @@ function injectMeetingHUD() {
       }
       .mc-pulse-dot.waiting { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
       .mc-pulse-dot.alerting { background: #eab308; animation: mc-blink 0.8s infinite; }
-      @keyframes mc-blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } }
+      @keyframes mc-blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.3); } }
 
       .mc-actions {
         margin-left: auto;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
       }
       .mc-btn-icon {
         background: transparent;
         border: none;
         color: #94a3b8;
         cursor: pointer;
-        padding: 4px;
+        padding: 4px 6px;
         border-radius: 6px;
         display: flex;
         align-items: center;
@@ -193,8 +277,65 @@ function injectMeetingHUD() {
         font-size: 13px;
       }
       .mc-btn-icon:hover { color: #fff; background: rgba(255,255,255,0.1); }
+      .mc-btn-export-hdr {
+        background: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .mc-btn-export-hdr:hover { background: rgba(56, 189, 248, 0.25); color: #fff; }
 
-      /* Goal section */
+      /* Tabs Bar */
+      .mc-tabs {
+        display: flex;
+        background: rgba(15, 23, 42, 0.9);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .mc-tab {
+        flex: 1;
+        padding: 8px 10px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 600;
+        color: #94a3b8;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+      }
+      .mc-tab:hover { color: #f1f5f9; background: rgba(255,255,255,0.03); }
+      .mc-tab.active {
+        color: #38bdf8;
+        border-bottom-color: #38bdf8;
+        background: rgba(56, 189, 248, 0.06);
+      }
+      .mc-tab-badge {
+        background: rgba(255,255,255,0.1);
+        border-radius: 99px;
+        padding: 1px 6px;
+        font-size: 10px;
+      }
+
+      /* Tab Content Panels */
+      .mc-tab-panel {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        overflow-y: auto;
+      }
+      .mc-tab-panel.active { display: flex; }
+
+      /* Goal section inside Wingman tab */
       .mc-goal-sec {
         padding: 10px 14px;
         border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -216,8 +357,8 @@ function injectMeetingHUD() {
       }
       .mc-input {
         flex: 1;
-        background: rgba(30, 41, 59, 0.8);
-        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(30, 41, 59, 0.85);
+        border: 1px solid rgba(255,255,255,0.14);
         border-radius: 8px;
         padding: 6px 10px;
         color: #fff;
@@ -235,6 +376,7 @@ function injectMeetingHUD() {
         font-weight: 600;
         cursor: pointer;
         transition: background 0.15s;
+        white-space: nowrap;
       }
       .mc-btn-primary:hover { background: #1d4ed8; }
 
@@ -255,13 +397,13 @@ function injectMeetingHUD() {
       }
       .mc-chip:hover { background: rgba(59, 130, 246, 0.3); color: #93c5fd; }
 
-      /* Alert Card Section */
+      /* Wingman Feed Section */
       .mc-body {
         padding: 12px 14px;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        max-height: 380px;
+        max-height: 360px;
         overflow-y: auto;
       }
 
@@ -273,19 +415,19 @@ function injectMeetingHUD() {
         transition: all 0.25s ease;
       }
       .mc-card.focus-alert {
-        background: rgba(245, 158, 11, 0.12);
+        background: rgba(245, 158, 11, 0.14);
         border: 1px solid #f59e0b;
-        box-shadow: 0 0 16px rgba(245, 158, 11, 0.2);
+        box-shadow: 0 0 18px rgba(245, 158, 11, 0.25);
         animation: mc-card-pop 0.3s ease;
       }
       .mc-card.ask-doubt {
-        background: rgba(34, 197, 94, 0.12);
+        background: rgba(34, 197, 94, 0.14);
         border: 1px solid #22c55e;
-        box-shadow: 0 0 16px rgba(34, 197, 94, 0.2);
+        box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
         animation: mc-card-pop 0.3s ease;
       }
       .mc-card.goal-resolved {
-        background: rgba(59, 130, 246, 0.12);
+        background: rgba(59, 130, 246, 0.14);
         border: 1px solid #3b82f6;
       }
       @keyframes mc-card-pop { from { transform: scale(0.97); opacity: 0.5; } to { transform: scale(1); opacity: 1; } }
@@ -309,18 +451,28 @@ function injectMeetingHUD() {
         margin-bottom: 8px;
       }
       .mc-doubt-quote {
-        background: rgba(15, 23, 42, 0.6);
+        background: rgba(15, 23, 42, 0.75);
         border-left: 3px solid #22c55e;
-        padding: 6px 10px;
+        padding: 7px 10px;
         border-radius: 0 6px 6px 0;
         font-style: italic;
         font-size: 12px;
         color: #f8fafc;
         margin-bottom: 8px;
       }
+      .mc-doubt-tip {
+        font-size: 11px;
+        color: #86efac;
+        background: rgba(34, 197, 94, 0.1);
+        border-radius: 6px;
+        padding: 5px 8px;
+        margin-bottom: 8px;
+        line-height: 1.4;
+      }
 
       .mc-btn-row {
         display: flex;
+        flex-wrap: wrap;
         gap: 6px;
       }
       .mc-btn-sm {
@@ -341,10 +493,80 @@ function injectMeetingHUD() {
       .mc-btn-sm.primary { background: #16a34a; border-color: #22c55e; }
       .mc-btn-sm.primary:hover { background: #15803d; }
 
+      /* Notes Panel Styling */
+      .mc-notes-bar {
+        padding: 8px 14px;
+        background: rgba(15, 23, 42, 0.4);
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        display: flex;
+        gap: 6px;
+      }
+      .mc-notes-input {
+        flex: 1;
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 11px;
+        color: #fff;
+        outline: none;
+      }
+      .mc-notes-list {
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .mc-note-item {
+        background: rgba(30, 41, 59, 0.6);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      .mc-note-tag {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-bottom: 3px;
+        display: flex;
+        justify-content: space-between;
+        color: #94a3b8;
+      }
+      .mc-note-tag.concept { color: #38bdf8; }
+      .mc-note-tag.action { color: #f59e0b; }
+      .mc-note-tag.decision { color: #22c55e; }
+
+      /* Transcript Panel Styling */
+      .mc-transcript-list {
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .mc-transcript-item {
+        font-size: 11.5px;
+        line-height: 1.4;
+        color: #cbd5e1;
+        padding: 4px 6px;
+        border-radius: 4px;
+        background: rgba(30, 41, 59, 0.3);
+      }
+      .mc-transcript-time {
+        color: #64748b;
+        font-size: 10px;
+        font-family: monospace;
+        margin-right: 4px;
+      }
+
       /* Footer status */
       .mc-footer {
-        padding: 6px 12px;
-        background: rgba(15, 23, 42, 0.8);
+        padding: 7px 14px;
+        background: rgba(15, 23, 42, 0.85);
         border-top: 1px solid rgba(255,255,255,0.06);
         display: flex;
         align-items: center;
@@ -387,39 +609,78 @@ function injectMeetingHUD() {
     <div id="mc-main-hud" class="mc-hud">
       <div class="mc-header" id="mc-drag-handle">
         <span class="mc-pulse-dot" id="mc-status-dot"></span>
-        <span class="mc-title">🎯 Meeting Copilot</span>
+        <span class="mc-title">🎯 Hush Copilot</span>
         <div class="mc-actions">
+          <button class="mc-btn-export-hdr" id="mc-btn-export" title="Download Notes & Transcript">📥 Export</button>
           <button class="mc-btn-icon" id="mc-toggle-sound" title="Toggle audio alert">🔔</button>
           <button class="mc-btn-icon" id="mc-btn-min" title="Minimize to pill">─</button>
         </div>
       </div>
 
-      <!-- Aim / Goal Setter -->
-      <div class="mc-goal-sec">
-        <div class="mc-label">
-          <span>Your Meeting Aim / Question</span>
-          <span id="mc-goal-status" style="color:#38bdf8;">Listening</span>
+      <!-- Navigation Tabs -->
+      <div class="mc-tabs">
+        <div class="mc-tab active" data-tab="wingman" id="mc-tab-btn-wingman">
+          🎯 Wingman
         </div>
-        <div class="mc-goal-input-box">
-          <input type="text" id="mc-goal-input" class="mc-input" placeholder="e.g. Ask if deadline can move to Friday..." />
-          <button id="mc-btn-save-goal" class="mc-btn-primary">Set Aim</button>
+        <div class="mc-tab" data-tab="notes" id="mc-tab-btn-notes">
+          📝 Notes <span class="mc-tab-badge" id="mc-notes-badge">0</span>
         </div>
-        <div class="mc-chips">
-          <span class="mc-chip" data-goal="Ask about project deadline and schedule">🕒 Deadline</span>
-          <span class="mc-chip" data-goal="Clarify who owns the authentication service">👤 Ownership</span>
-          <span class="mc-chip" data-goal="Inquire about budget limits and cost impact">💰 Budget</span>
-          <span class="mc-chip" data-goal="Ask about API migration testing plan">❓ API Migration</span>
+        <div class="mc-tab" data-tab="transcript" id="mc-tab-btn-transcript">
+          📜 Transcript <span class="mc-tab-badge" id="mc-transcript-badge">0</span>
         </div>
       </div>
 
-      <!-- Live Wingman Card Feed -->
-      <div class="mc-body" id="mc-card-feed">
-        <div class="mc-card" id="mc-active-card">
-          <div class="mc-card-header">
-            <span>👂 Monitoring Meeting</span>
+      <!-- TAB 1: WINGMAN -->
+      <div class="mc-tab-panel active" id="mc-panel-wingman">
+        <!-- Aim / Goal Setter -->
+        <div class="mc-goal-sec">
+          <div class="mc-label">
+            <span>Your Aim / Learning Goal</span>
+            <span id="mc-goal-status" style="color:#38bdf8;">Listening</span>
           </div>
-          <div class="mc-card-summary">
-            Set your meeting aim above. When the discussion turns to your topic or someone pauses, your copilot will alert you here.
+          <div class="mc-goal-input-box">
+            <input type="text" id="mc-goal-input" class="mc-input" placeholder="e.g. Master Full Stack Development, Learn Docker..." />
+            <button id="mc-btn-save-goal" class="mc-btn-primary">Set Aim</button>
+          </div>
+          <div class="mc-chips">
+            <span class="mc-chip" data-goal="Learn full stack development, React and backend APIs">🚀 Full Stack Dev</span>
+            <span class="mc-chip" data-goal="Understand system architecture, database indexing and deployment">🛠️ Tech & Architecture</span>
+            <span class="mc-chip" data-goal="Track project deliverables, blockers and deadlines">💼 Project Sync</span>
+            <span class="mc-chip" data-goal="Capture technical interview questions and key concepts">🎯 Interview Prep</span>
+          </div>
+        </div>
+
+        <!-- Live Wingman Card Feed -->
+        <div class="mc-body" id="mc-card-feed">
+          <div class="mc-card" id="mc-active-card">
+            <div class="mc-card-header">
+              <span>👂 Personal Wingman Active</span>
+            </div>
+            <div class="mc-card-summary" style="color:#94a3b8;">
+              Set your goal above. When the speaker touches your topic, you'll receive instant wake-up alerts and doubt suggestions.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: NOTES -->
+      <div class="mc-tab-panel" id="mc-panel-notes">
+        <div class="mc-notes-bar">
+          <input type="text" id="mc-manual-note-input" class="mc-notes-input" placeholder="Add your own quick note..." />
+          <button id="mc-btn-add-note" class="mc-btn-primary" style="padding:4px 10px;font-size:11px;">Add</button>
+        </div>
+        <div class="mc-notes-list" id="mc-notes-container">
+          <div style="font-size:12px;color:#94a3b8;text-align:center;padding:24px 0;">
+            No notes yet. Concepts, decisions, and action items will automatically appear here as people speak.
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: TRANSCRIPT -->
+      <div class="mc-tab-panel" id="mc-panel-transcript">
+        <div class="mc-transcript-list" id="mc-transcript-container">
+          <div style="font-size:12px;color:#94a3b8;text-align:center;padding:24px 0;">
+            Captions will appear here chronologically once speech is detected.
           </div>
         </div>
       </div>
@@ -445,9 +706,55 @@ function setupHUDInteractions() {
   const toggleSound = document.getElementById("mc-toggle-sound");
   const goalInput = document.getElementById("mc-goal-input");
   const btnSaveGoal = document.getElementById("mc-btn-save-goal");
+  const btnExport = document.getElementById("mc-btn-export");
   const dragHandle = document.getElementById("mc-drag-handle");
 
-  // Load existing goal from storage
+  // Tab switching
+  const tabs = document.querySelectorAll(".mc-tab");
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      tabs.forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".mc-tab-panel").forEach(p => p.classList.remove("active"));
+
+      tab.classList.add("active");
+      const targetId = `mc-panel-${tab.dataset.tab}`;
+      const targetPanel = document.getElementById(targetId);
+      if (targetPanel) targetPanel.classList.add("active");
+      activeTab = tab.dataset.tab;
+    });
+  });
+
+  // Export button
+  btnExport.addEventListener("click", () => {
+    exportSessionMarkdown();
+  });
+
+  // Manual note addition
+  const manualInput = document.getElementById("mc-manual-note-input");
+  const btnAddNote = document.getElementById("mc-btn-add-note");
+  if (btnAddNote && manualInput) {
+    const handleAdd = () => {
+      const text = manualInput.value.trim();
+      if (!text) return;
+      const note = {
+        category: "User Note",
+        icon: "✍️",
+        text,
+        speaker: "You",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      sessionNotes.push(note);
+      manualInput.value = "";
+      renderNotesList();
+      chrome.runtime.sendMessage({ type: "HUSH_SAVE_NOTE", note });
+    };
+    btnAddNote.addEventListener("click", handleAdd);
+    manualInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleAdd();
+    });
+  }
+
+  // Load existing goal & settings from storage
   chrome.storage.local.get(["meeting_goal", "sound_enabled"], (data) => {
     if (data.meeting_goal) {
       currentGoal = data.meeting_goal;
@@ -539,7 +846,7 @@ function saveGoal(goal) {
   // Reset feed
   renderActiveCard({
     nudge_type: "STAY_SILENT",
-    wake_up_summary: goal ? `Aim set: "${goal}". Listening to Google Meet captions...` : "Monitoring meeting.",
+    wake_up_summary: goal ? `Aim locked: "${goal}". Listening to Google Meet captions...` : "Monitoring live speech.",
   });
 }
 
@@ -550,6 +857,72 @@ function updatePillText() {
   }
 }
 
+// ── Render Notes List ─────────────────────────────────────────────────
+function renderNotesList() {
+  const container = document.getElementById("mc-notes-container");
+  const badge = document.getElementById("mc-notes-badge");
+  if (!container) return;
+
+  if (badge) badge.textContent = sessionNotes.length;
+
+  if (sessionNotes.length === 0) {
+    container.innerHTML = `
+      <div style="font-size:12px;color:#94a3b8;text-align:center;padding:24px 0;">
+        No notes yet. Concepts, decisions, and action items will automatically appear here as people speak.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = sessionNotes.slice().reverse().map(n => {
+    const catClass = (n.category || "").toLowerCase().includes("action") ? "action"
+      : (n.category || "").toLowerCase().includes("decision") ? "decision" : "concept";
+    const icon = n.icon === "action" || (n.category || "").includes("Action") ? "📌"
+      : n.icon === "decision" || (n.category || "").includes("Decision") ? "💡"
+      : n.icon === "concept" || (n.category || "").includes("Concept") ? "⚡"
+      : n.icon === "User Note" || (n.category || "").includes("User") ? "✍️"
+      : (typeof n.icon === "string" && n.icon.length <= 2 ? n.icon : "📌");
+    return `
+      <div class="mc-note-item">
+        <div class="mc-note-tag ${catClass}">
+          <span>${icon} ${n.category || 'Note'}</span>
+          <span>${n.time || ''}</span>
+        </div>
+        <div style="color:#f1f5f9;line-height:1.4;">${n.text}</div>
+        ${n.speaker ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px;">— ${n.speaker}</div>` : ''}
+      </div>
+    `;
+  }).join("");
+}
+
+// ── Render Transcript List ───────────────────────────────────────────
+function renderTranscriptList() {
+  const container = document.getElementById("mc-transcript-container");
+  const badge = document.getElementById("mc-transcript-badge");
+  if (!container) return;
+
+  if (badge) badge.textContent = sessionTranscript.length;
+
+  if (sessionTranscript.length === 0) {
+    container.innerHTML = `
+      <div style="font-size:12px;color:#94a3b8;text-align:center;padding:24px 0;">
+        Captions will appear here chronologically once speech is detected.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = sessionTranscript.slice(-40).map(t => `
+    <div class="mc-transcript-item">
+      <span class="mc-transcript-time">[${t.time}]</span>
+      <span>${t.text}</span>
+    </div>
+  `).join("");
+
+  // Auto scroll to bottom
+  container.scrollTop = container.scrollHeight;
+}
+
 // ── Render Live Wingman Cards ──────────────────────────────────────────
 function renderActiveCard(record) {
   const feed = document.getElementById("mc-card-feed");
@@ -558,10 +931,13 @@ function renderActiveCard(record) {
   const pillDot = document.getElementById("mc-pill-dot");
   if (!feed) return;
 
+  activeWingmanRecord = record;
   const nudge = record.nudge_type || "STAY_SILENT";
   const speaker = record.speaker || "Speaker";
   const summary = record.wake_up_summary || "";
   const doubt = record.suggested_doubt || "";
+  const doubtTip = record.doubt_tip || "💡 Asking now clarifies concepts and keeps you 100% on track!";
+  const questions = record.suggested_questions || [];
   const reason = record.reason || "";
 
   let cardHtml = "";
@@ -596,14 +972,23 @@ function renderActiveCard(record) {
           <span>🎤 ASK YOUR QUESTION NOW</span>
         </div>
         <div class="mc-card-summary">
-          <strong>${speaker}</strong> just paused or invited questions.
+          <strong>${speaker}</strong> just paused or opened the floor.
         </div>
-        <div class="mc-doubt-quote" id="mc-doubt-text">"${doubt || `Could you clarify how this impacts ${currentGoal}?`}"</div>
+        <div class="mc-doubt-tip">${doubtTip}</div>
+        <div class="mc-doubt-quote" id="mc-doubt-text">"${doubt || `Could you clarify how this connects to ${currentGoal}?`}"</div>
         <div class="mc-btn-row">
           <button class="mc-btn-sm primary" id="mc-btn-copy-doubt">📋 Copy Question</button>
           <button class="mc-btn-sm" id="mc-btn-paste-chat">💬 Paste to Meet Chat</button>
           <button class="mc-btn-sm" id="mc-btn-mark-asked">✅ Mark Asked</button>
         </div>
+        ${questions.length > 0 ? `
+          <div style="margin-top:8px;font-size:11px;color:#94a3b8;">Alternative questions:</div>
+          <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
+            ${questions.map(q => `
+              <div class="mc-btn-sm mc-alt-q" style="font-size:11px;cursor:pointer;" title="Click to use this question">${q}</div>
+            `).join("")}
+          </div>
+        ` : ''}
       </div>
     `;
   } else if (nudge === "GOAL_RESOLVED") {
@@ -663,10 +1048,20 @@ function renderActiveCard(record) {
     markBtn.addEventListener("click", () => {
       renderActiveCard({
         nudge_type: "GOAL_RESOLVED",
-        wake_up_summary: "You asked your doubt! Copilot will continue tracking the response."
+        wake_up_summary: "You asked your question! Copilot will continue tracking the response."
       });
     });
   }
+
+  // Bind alternative question clicks
+  document.querySelectorAll(".mc-alt-q").forEach(el => {
+    el.addEventListener("click", () => {
+      const chosen = el.textContent.trim();
+      const quoteEl = document.getElementById("mc-doubt-text");
+      if (quoteEl) quoteEl.textContent = `"${chosen}"`;
+      pasteToMeetChat(chosen);
+    });
+  });
 }
 
 // ── Google Meet Captions Observation ──────────────────────────────────
@@ -783,6 +1178,13 @@ function commitLine(speaker, text) {
   const line = speaker ? `[${speaker}]: ${clean}` : clean;
   lineBuffer.push(line);
 
+  // Add to in-memory live transcript
+  sessionTranscript.push({
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    text: line,
+  });
+  renderTranscriptList();
+
   if (lineBuffer.length >= MAX_BUFFER_LINES) {
     flushBuffer(false);
   } else {
@@ -813,6 +1215,10 @@ function flushBuffer(force) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "WINGMAN_NUDGE" && msg.record) {
     renderActiveCard(msg.record);
+    if (msg.sessionNotes && Array.isArray(msg.sessionNotes)) {
+      sessionNotes = msg.sessionNotes;
+      renderNotesList();
+    }
     sendResponse({ ok: true });
     return true;
   }
@@ -821,7 +1227,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     currentGoal = msg.goal || "";
     const input = document.getElementById("mc-goal-input");
     if (input) input.value = currentGoal;
+    const statusEl = document.getElementById("mc-goal-status");
+    if (statusEl) statusEl.textContent = currentGoal ? "Aim Locked" : "No Aim";
     updatePillText();
+
+    if (msg.notes && Array.isArray(msg.notes)) {
+      sessionNotes = msg.notes;
+      renderNotesList();
+    }
+    if (msg.transcript && Array.isArray(msg.transcript)) {
+      sessionTranscript = msg.transcript;
+      renderTranscriptList();
+    }
+
     sendResponse({ ok: true });
     return true;
   }

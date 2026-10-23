@@ -117,8 +117,8 @@ class HackathonAgent:
         2. Is this an opportune moment to ask their doubt? (ASK_DOUBT / suggested question)
         3. Was the attendee's goal resolved? (GOAL_RESOLVED)
         4. Should it stay silent to avoid distracting the attendee? (STAY_SILENT)
+        5. Extracts live notes (concepts, actions, decisions) and hesitation-buster doubt cues.
         """
-        import json
         import re
 
         clean_segment = segment.strip()
@@ -133,7 +133,10 @@ class HackathonAgent:
                 "goal_relevance": "NONE",
                 "wake_up_summary": "",
                 "suggested_doubt": "",
-                "reason": "No meeting goal set. Enter your aim to activate personal alerts.",
+                "doubt_tip": "",
+                "suggested_questions": [],
+                "extracted_notes": [],
+                "reason": "No meeting goal set. Enter your aim to activate personal alerts and doubt suggestions.",
                 "goal_status": "pending",
                 "decisions": [],
             }
@@ -192,7 +195,7 @@ class HackathonAgent:
             is_rel = overlap
             if not is_rel:
                 cue = "STAY_SILENT"
-            elif any(q in text_lower for q in ["question", "doubt", "what do you think", "any thoughts", "?", "makes sense"]):
+            elif any(q in text_lower for q in ["question", "doubt", "what do you think", "any thoughts", "?", "makes sense", "pause"]):
                 cue = "ASK_DOUBT"
             else:
                 cue = "FOCUS_ALERT"
@@ -200,39 +203,84 @@ class HackathonAgent:
         speakers = re.findall(r"\[?([A-Za-z][A-Za-z ]{1,30})\]?:", clean_segment)
         active_speaker = speakers[-1] if speakers else "The speaker"
 
-        wake_up_summary = ""
-        suggested_doubt = ""
-        reason = ""
-        goal_status = "in_progress" if is_rel else "pending"
-
         # Extract the most salient utterance from the segment
         turns = [l.strip() for l in clean_segment.splitlines() if l.strip()]
         last_turn = turns[-1] if turns else clean_segment
         # Strip speaker prefix if present for clean quoting
-        clean_quote = re.sub(r"^\[?[A-Za-z][A-Za-z ]{1,30}\]?:?\s*", "", last_turn)
+        clean_quote = re.sub(r"^\[?[A-Za-z][A-Za-z ]{1,30}\]?:?\s*", "", last_turn).strip()
 
         wake_up_summary = ""
         suggested_doubt = ""
+        doubt_tip = ""
+        suggested_questions: list[str] = []
         reason = ""
         goal_status = "in_progress" if is_rel else "pending"
 
+        # Generate contextual doubt questions & hesitation-buster cues
+        topic_subject = clean_goal.replace("Ask about", "").replace("Learn", "").strip() or clean_goal
+        clean_quote_snippet = clean_quote[:70] + ("..." if len(clean_quote) > 70 else "")
+
         if cue == "FOCUS_ALERT":
-            wake_up_summary = f"{active_speaker} just brought up your topic: \"{clean_quote}\""
+            wake_up_summary = f"{active_speaker} just brought up your topic: \"{clean_quote_snippet}\""
             reason = f"Context Alert: '{clean_goal}' is now being actively discussed."
         elif cue == "ASK_DOUBT":
-            suggested_doubt = f"{active_speaker}, regarding {clean_goal}, could you clarify the timeline and next steps?"
-            wake_up_summary = f"{active_speaker} finished explaining: \"{clean_quote}\""
-            reason = f"Opportune moment to ask doubt: {active_speaker} paused or opened the floor."
+            suggested_doubt = f"Regarding {topic_subject}, could you clarify the best approach or next steps for {clean_quote_snippet}?"
+            suggested_questions = [
+                f"{active_speaker}, could you give a practical example of how {topic_subject} is applied in production?",
+                f"Are there any common pitfalls or prerequisites we should be careful of with {topic_subject}?",
+                f"How does this impact the overall timeline and architecture for our {topic_subject} goal?",
+            ]
+            doubt_tip = "Don't hesitate to ask! The speaker just concluded their point. Asking now shows active participation and clarifies doubts before moving forward."
+            wake_up_summary = f"{active_speaker} concluded explanation: \"{clean_quote_snippet}\""
+            reason = f"Opportune moment to ask doubt: {active_speaker} paused or concluded this explanation."
         elif cue == "GOAL_RESOLVED":
-            wake_up_summary = f"{active_speaker} covered key details: \"{clean_quote}\""
+            wake_up_summary = f"{active_speaker} covered key details: \"{clean_quote_snippet}\""
             reason = f"Resolution detected: details relating to '{clean_goal}' were addressed."
             goal_status = "resolved"
+
+        # ── Live Auto-Notes Extraction ────────────────────────────────────
+        extracted_notes = []
+        for line in turns:
+            sp = re.findall(r"^\[?([A-Za-z][A-Za-z ]{1,30})\]?:?\s*", line)
+            sp_name = sp[0] if sp else active_speaker
+            line_body = re.sub(r"^\[?[A-Za-z][A-Za-z ]{1,30}\]?:?\s*", "", line).strip()
+            if not line_body or len(line_body) < 12:
+                continue
+
+            lower_line = line_body.lower()
+            # 1. Action Items
+            if any(k in lower_line for k in ["need to", "must", "will deploy", "deadline", "action item", "todo", "make sure to", "by tomorrow", "by friday", "deliver", "ship"]):
+                extracted_notes.append({
+                    "category": "Action Item",
+                    "icon": "action",
+                    "text": line_body,
+                    "speaker": sp_name,
+                })
+            # 2. Decisions & Takeaways
+            elif any(k in lower_line for k in ["decided", "agreed", "conclusion", "we should use", "recommended", "the rule is", "important", "remember that"]):
+                extracted_notes.append({
+                    "category": "Decision",
+                    "icon": "decision",
+                    "text": line_body,
+                    "speaker": sp_name,
+                })
+            # 3. Goal-relevant core concepts / tools
+            elif is_rel and any(w in lower_line for w in [w.lower() for w in re.findall(r"\w+", clean_goal) if len(w) > 3]):
+                extracted_notes.append({
+                    "category": "Core Concept",
+                    "icon": "concept",
+                    "text": line_body,
+                    "speaker": sp_name,
+                })
 
         return {
             "nudge_type": cue,
             "goal_relevance": "HIGH" if is_rel else "NONE",
             "wake_up_summary": wake_up_summary,
             "suggested_doubt": suggested_doubt,
+            "doubt_tip": doubt_tip,
+            "suggested_questions": suggested_questions,
+            "extracted_notes": extracted_notes,
             "speaker": active_speaker,
             "reason": reason,
             "goal_status": goal_status,
