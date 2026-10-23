@@ -1488,24 +1488,27 @@ function scanForCaptions() {
   }
 
   const ccStatusEl = document.getElementById("mc-cc-status");
-  if (ccStatusEl) {
-    if (detectedCaptions.length > 0) {
-      ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected (Speech Active)</span>';
-    } else {
-      ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
-    }
-  }
-
-  // Process the most recent active caption
   if (detectedCaptions.length > 0) {
+    if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected (Speech Active)</span>';
     const latest = detectedCaptions[detectedCaptions.length - 1];
     processLiveText(latest.speaker, latest.text);
+  } else {
+    if (ccStatusEl) ccStatusEl.innerHTML = '<span style="color:#22c55e;">CC Connected</span>';
+    // If subtitle was cleared from screen and we have uncommitted utterance, finalize immediately!
+    if (liveUtterance.text) {
+      finalizeLiveUtterance();
+    }
   }
 }
 
 function processLiveText(speaker, text) {
   const clean = text.trim();
   if (!clean || clean === lastSentText) return;
+
+  // If text has not changed since last scan, do NOT restart the debounce timer!
+  if (clean === liveUtterance.text && speaker === liveUtterance.speaker) {
+    return;
+  }
 
   // If speaker changed, immediately commit whatever the previous speaker said
   if (liveUtterance.speaker && liveUtterance.speaker !== speaker && liveUtterance.text) {
@@ -1515,11 +1518,11 @@ function processLiveText(speaker, text) {
   liveUtterance.speaker = speaker;
   liveUtterance.text = clean;
 
-  // Restart debounce timer to commit once the speaker pauses
+  // Commit once the speaker finishes speaking or pauses for 800ms
   clearTimeout(liveUtterance.timer);
   liveUtterance.timer = setTimeout(() => {
     finalizeLiveUtterance();
-  }, UTTERANCE_FINALIZE_DELAY_MS);
+  }, 800);
 }
 
 function finalizeLiveUtterance() {
@@ -1549,13 +1552,13 @@ function commitLine(speaker, text) {
   });
   renderTranscriptList();
 
-  // Prompt immediate flush so the AI evaluates without lag
-  scheduleFlush();
+  // Send to AI immediately
+  flushBuffer(false);
 }
 
 function scheduleFlush() {
   clearTimeout(flushTimer);
-  flushTimer = setTimeout(() => flushBuffer(false), 500);
+  flushTimer = setTimeout(() => flushBuffer(false), 300);
 }
 
 function flushBuffer(force) {
@@ -1570,7 +1573,6 @@ function flushBuffer(force) {
     goal: currentGoal,
     ts: Date.now(),
   });
-}
 }
 
 // ── Messages from Background / Popup ──────────────────────────────────
